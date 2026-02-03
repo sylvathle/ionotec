@@ -28,14 +28,40 @@ import georinex as gr
 import pandas as pd
 import numpy as np
 
-from os import listdir, getenv, path
+from os import listdir, getenv, path, makedirs
 from os.path import isfile, join
 
 import sys
 
-from decouple import config
+#import os
+#root_dir = os.environ.get('PYTEC_PATH')
 
-root_dir = config('PYTEC_PATH')+"/"
+from pathlib import Path
+# create output dir
+base_dir = Path(sys.argv[0]).resolve().parent
+target_dir = base_dir / "output/"
+target_dir.mkdir(parents=True, exist_ok=True)
+root_dir = str(target_dir)+"/"
+print ("root_dir", root_dir)
+
+def create_output(folder_name: str) -> Path:
+    """
+    Create a folder in the same directory as the script that started execution
+    (e.g. main.py).
+    """
+    main_file = Path(sys.argv[0]).resolve()
+    base_dir = main_file.parent
+
+    target_dir = base_dir / folder_name
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    return target_dir
+
+#def create_output(base_dir: Path, folder_name: str) -> Path:
+#    base_dir = Path(base_dir).resolve()
+#    target = base_dir / folder_name
+#    target.mkdir(parents=True, exist_ok=True)
+#    return target
 
 csv_stations = root_dir+"stations.csv"
 

@@ -32,16 +32,20 @@ import georinex as gr
 import datetime
 import math
 import numpy as np
-import urllib.request
+#import urllib.request
 import pymap3d as pm
 #from unlzw import unlzw
 
+from warnings import simplefilter
+simplefilter(action='ignore', category=FutureWarning)
+
+
 import pandas as pd
 
-import random
-import time
+#import random
+#import time
 
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from . import stations as st
 
 from os import listdir

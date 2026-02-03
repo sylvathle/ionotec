@@ -45,6 +45,8 @@ import time
 from . import stations as st
 from . import gnss
 
+
+
 pd.options.mode.chained_assignment = None
 
 # Earth Radius
@@ -63,14 +65,14 @@ def fit_lin(t,sig):
     N=len(t)
     # Coefficients of paraboloid of error function (N*mse)
     a,b,c,d,e=0,N,0,0,0 # b=N for B^2 coef
-    # Iterate of subseries to calculate coeficients
+    # Iterate over subseries to calculate coefficients
     for i in range(N):
         a+=t[i]**2 # A^2 coef
         c+=2*t[i] # A*B coef
         d-=2*t[i]*sig[i] # A coef
         e-=2*sig[i] # B coef
 
-    # Forward A and B parameters of linear fit (solve minimum of mse)
+    # Forward A and B parameters of linear fit (solve the minimum of mse)
     A=-(2*b*d-c*e)/(4*a*b-c**2)
     B=-(c*d-2*a*e)/(c**2-4*a*b)
 
@@ -166,10 +168,12 @@ def plot_leap(diffs,series,s,A,B,N,borders,title=""):
     plt.show()
     plt.close()
 
+from pathlib import Path
+
 class tec:
 
-    def __init__(self,list_f_obs,f_nav,f_sat_bias,f_out="",resolution=60,h=400000):
-
+    def __init__(self,list_f_obs,f_nav,f_sat_bias,outfolder="output",resolution=60,h=400000):
+    
         # List of observation files
         self.list_f_obs = list_f_obs        
         # List of navigation files
@@ -177,11 +181,11 @@ class tec:
         # File containing satellite bias
         self.f_sat_bias = f_sat_bias
         #Output feather file
-        if f_out == "": 
-            self.f_feather = self.list_f_obs[min(len(self.list_f_obs)-1,1)][:-4]+"tec.feather"
-        else:
-            if f_out[-8:] ==".feather": self.f_feather = f_out
-            else: self.f_feather = f_out + ".feather"
+        #if f_out == "": 
+        #    self.f_feather = self.list_f_obs[min(len(self.list_f_obs)-1,1)][:-4]+"tec.feather"
+        #else:
+        #    if f_out[-8:] ==".feather": self.f_feather = f_out
+        #    else: self.f_feather = f_out + ".feather"
         
         if not os.path.isfile(self.f_sat_bias): 
             print ("bias file location not found, will take 0, might affect strongly the results")
@@ -845,6 +849,7 @@ class tec:
         self.df_obs["VTEC"]=(self.df_obs["STEC_sl"]-self.br)*np.cos(np.arcsin(R_E*np.cos(self.df_obs["elevation"])/(R_E+self.h)))
 
     def to_feather(self, f_feather):
+        print (f_feather)
         self.df_obs[["sv","lat","lon","elevation","STEC_slp","STEC_sl","VTEC"]].reset_index().to_feather(f_feather)
 
 
@@ -862,10 +867,7 @@ class tec:
         print ("Calculating receiver bias, correct Slant TEC, compute VTEC")
         self.add_receiver_bias()
         
-        
-        
-
-
-        print ("Save to feather:",self.f_feather)
-        self.to_feather(self.f_feather)
+        print ("Save to feather:",st.root_dir + "TEC/" + str(self.year) + "/" + self.station + str(self.doy) + "tec.feather")
+        self.to_feather(st.root_dir + "TEC/" + str(self.year) + "/" + self.station + str(self.doy) + "tec.feather" )
+        #self.to_feather(self.f_feather)
     
