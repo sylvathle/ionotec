@@ -1,5 +1,5 @@
 [project]
-name = "pytec"
+name = "ionotec"
 version = "0.0.9"
 authors = [
   { name="Sylvain Blunier", email="sylvain.blunier@gmail.com" },
@@ -16,5 +16,5 @@ license-files = ["LICEN[CS]E*"]
 dependencies = [ "georinex", "numpy", "pandas", "pymap3d", "datetime" ]
 
 [project.urls]
-Homepage = "https://github.com/sylvathle/pytec"
-Issues = "https://github.com/sylvathle/pytec/issues"
+Homepage = "https://github.com/sylvathle/ionotec"
+Issues = "https://github.com/sylvathle/ionotec/issues"
