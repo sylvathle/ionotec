@@ -39,8 +39,9 @@ import pymap3d as pm
 from warnings import simplefilter
 simplefilter(action='ignore', category=FutureWarning)
 
-
 import pandas as pd
+
+pd.options.mode.chained_assignment = None
 
 #import random
 #import time
@@ -89,6 +90,34 @@ def getDateFromSat(weekNumber,seconds):
 		sec -= 86400
 	date = date_ref + datetime.timedelta(days=days) + datetime.timedelta(seconds=sec)
 	return date
+
+def removeOutsiders(df,thres=datetime.timedelta(days=1)):
+    #### Remove outsiders
+    T = df.index
+    diff_t = []
+    for it in range(len(T)-1):
+        diff_t.append(T[it+1]-T[it])
+    
+    outsider=[]
+    istail = False
+    thres_t = datetime.timedelta(days=1)
+    for d in range(len(diff_t)):
+        if diff_t[d]>thres_t: 
+            outsider.append(True)
+        else:
+            if not istail: 
+                istail=True
+                outsider.append(False)
+            outsider.append(False)
+            
+    #print (outsider)    
+    #print (len(outsider))
+    #print (len(diff_t))
+
+    df["out"] = outsider
+    df = df[df["out"]==False]
+    df.drop(columns=["out"],inplace=True)    
+    return df
 
 def gps_nav_to_XYZ(data,date):
     Toe = data['Toe']
@@ -170,7 +199,7 @@ def gps_nav_to_XYZ(data,date):
     Zk = Yk_p * math.sin(ik)
     return [Xk,Yk,Zk]
 
-dir_sats = "sats/"
+#dir_sats = "sats/"
 
 class gnss:
     '''
@@ -179,208 +208,337 @@ class gnss:
         for now it only works on GPS constellation, future version should deal
         with GLONASS
     '''
-    def __init__(self,f_nav=[],resolution=60):
-     
-        self.gps_dir = st.root_dir + "GPS/"
-        if not os.path.exists(self.gps_dir):
-            try: os.mkdir(self.gps_dir)
-            except OSError as e:
-                if e.errno!=17: print ("FAIL creation of directory "+self.gps_dir, e )
-            else: print ("Successfully created the directory "+self.gps_dir)
 
+    file_format = 'feather' ## csv format not implemented
+
+    n_sat_gps = 32
+    n_sat_glonass = 24
+    n_sat_galileo = 25
+    resolution = 60
+
+    list_f_rinex_nav = []
+
+    #list_cols_gps = ["Toe","TGD","IDOT","IODC","GPSWeek","TransTime","SVclockBias","SVclockDrift",\
+    #    "SVclockDriftRate","sqrtA","Eccentricity","Io","Omega0","omega","M0","DeltaN","OmegaDot","Cus","Cuc",\
+    #    "Cis","Crs","Crc","Cic"] 
+    #list_cols_glonass = ["sv","X","Y","Z","dX","dY","dZ","dX2","dY2","dZ2"]
+
+
+    rinex_doy = 1
+    rinex_year = 2020
+    f_doy_reported = ""
+    
+    def __init__(self,f_nav=[],resolution=60,form='feather'):
+        
+        self.gnss_dir = st.root_dir + "GNSS/"
+        
+        if not os.path.exists(self.gnss_dir):
+            try: os.mkdir(self.gnss_dir)
+            except OSError as e:
+                if e.errno!=17: print ("FAIL creation of directory "+self.gnss_dir, e )
+            else: print ("Successfully created the directory "+self.gnss_dir)
+
+        self.file_format = form
         self.list_f_rinex_nav = f_nav
         self.dict_df_pos = {}
         self.df_pos = pd.DataFrame()
+        
+        #self.df_doy_processed = pd.DataFrame()
+        self.dict_doy_processed = {}# {"date":[],"G_res":[],"R_res":[]}
+        self.csv_record_processing = self.gnss_dir+"/record_processing.csv"
+        
         self.resolution = resolution
-        self.compute_position(self.list_f_rinex_nav)
+      
+        self.compute_position()
 
 
-    # Function that loads the satellite of a specific year, files must exist, otherwise load empty
-    def load_sats(self,d_in,d_out):
-    
-        year = d_in.year
-        first = True
-         
-        for i in range(1,33):
-            #Name of the satellite
-            sat = ""
-            if i<10: sat = "G0"+str(i)
-            else: sat = "G"+str(i)
+    def inform_date_processed(self,list_date,constellation):
 
-            sat_file = self.gps_dir + str(year) + "/" + sat + ".feather"
+        # Make sure there is data before 10:00
+        cutoff_I = datetime.time(4, 0)
+        cutoff_F = datetime.time(20, 0)
+        dates = {
+            dt.date()
+            for dt in list_date
+                if (dt.time() < cutoff_F) and (cutoff_I > dt.time())
+        }
+        #print (list_date)
+        #print (constellation)
+        #print (dates)
 
-            if os.path.exists(sat_file):
-                self.dict_df_pos[sat] = pd.read_feather(sat_file)
-                self.dict_df_pos[sat].set_index("time",inplace=True)
-                self.dict_df_pos[sat].index = pd.to_datetime(self.dict_df_pos[sat].index)
-                mask = (self.dict_df_pos[sat].index>=d_in) & (self.dict_df_pos[sat].index<=d_out)
-                self.dict_df_pos[sat]=self.dict_df_pos[sat].loc[mask]
-                if first:
-                    self.df_pos = self.dict_df_pos[sat]
-                    self.df_pos["sv"] = sat
-                    first = False
-                else:
-                    df_inter = self.dict_df_pos[sat]
-                    df_inter["sv"] = sat
-                    self.df_pos = pd.concat([self.df_pos,df_inter])
+        for date in dates:  
+            if date in self.dict_doy_processed.keys():
+                if (self.resolution<self.dict_doy_processed[date][constellation+"_res"]) or\
+                    (self.dict_doy_processed[date][constellation+"_res"]==0):
+                    self.dict_doy_processed[date][constellation+"_res"] = self.resolution
             else:
-                self.dict_df_pos[sat] = pd.DataFrame()
-
-       
+                self.dict_doy_processed[date] = {"G_res":0,"R_res":0}
+                #self.dict_doy_processed["date"].append(date)
+                #self.dict_doy_processed["G_res"].append(0)
+                #self.dict_doy_processed["R_res"].append(0)
+                self.dict_doy_processed[date][constellation+"_res"]=self.resolution
+        #print (self.dict_doy_processed)
+    
     # Function that compute the position of the satellites from the navigation file 
     #   with the resolution informed when instanciating the gnss object
-    def compute_position(self,form='feather'):
-    
-        # Columns that need to be used
-        list_cols = ["Toe","TGD","IDOT","IODC","GPSWeek","TransTime","SVclockBias","SVclockDrift",\
-        "SVclockDriftRate","sqrtA","Eccentricity","Io","Omega0","omega","M0","DeltaN","OmegaDot","Cus","Cuc",\
-        "Cis","Crs","Crc","Cic"] 
+    def compute_position(self):
 
-        for f_rinex_nav in self.list_f_rinex_nav:
-
-            rinex_doy = int(f_rinex_nav[-8:-5])
-            rinex_year = int("20"+f_rinex_nav[-3:-1])
-
-            # Construct path of satellite files and create directory if does not exists
-            year_gpsdir = self.gps_dir + str(rinex_year)
-            if not os.path.exists(year_gpsdir):
-                try: os.mkdir(year_gpsdir)
-                except OSError as e:
-                    if e.errno!=17: print ("FAIL creation of directory "+year_gpsdir, e )
-                    else: print ("Successfully created the directory "+year_gpsdir)    
-            
-            #Annex file reporting doy that have been considered for each satellite
-            f_doy_reported = year_gpsdir + "/reported_doy.feather"
-            
-            
-            if not os.path.exists(f_doy_reported):
-                dict_doy_reported = {"sat":[],"res":[]}
-                for doy in range(366):
-                    dict_doy_reported[str(doy)] = []
-                for i in range(1,33):
-                    #Name of the satellite
-                    sat = ""
-                    if i<10: sat = "G0"+str(i)
-                    else: sat = "G"+str(i)
-                    dict_doy_reported["sat"].append(sat)
-                    dict_doy_reported["res"].append(self.resolution )
-                    for doy in range(366):
-                        dict_doy_reported[str(doy)].append(0)
-                pd.DataFrame(dict_doy_reported).to_feather(f_doy_reported)      
-
-            # Load report of already processed files in order to know which doy have been processed 
-            #   for each satellite and with which resolution
-            df_doy_reported = pd.read_feather(f_doy_reported)
-            df_doy_reported.set_index("sat",inplace=True)
-           
-            # Prepare time list that will be used
-            t_base = datetime.datetime(rinex_year,1,1,0,0,0,0)+datetime.timedelta(days=rinex_doy-1)
-            t=t_base
-            time_list = []
-            while t<t_base+datetime.timedelta(days=1):
-                time_list.append(t)
-                t += datetime.timedelta(seconds=self.resolution)
-
+        list_nav_gps = []
+        self.df_nav_glonass = pd.DataFrame()
+        self.df_nav_gps = pd.DataFrame()      
         
-            # Load provided navigation file
-            try:
-                nav = gr.load(f_rinex_nav)
-                df_nav = nav.to_dataframe()
-            except ValueError:
-                print ("COuld not load file", f_rinex_nav)
-                continue
-                
-
-            # Make if friendly to use with dataframe
+        if os.path.exists(self.csv_record_processing):
+            df_doy_processed = pd.read_csv(self.csv_record_processing,index_col="time")
+            #df_doy_processed = df_doy_processed.T
+            #print (df_doy_processed)
+            df_doy_processed.index = pd.to_datetime(df_doy_processed.index).date
+            df_doy_processed = df_doy_processed.T
+            self.dict_doy_processed = df_doy_processed.to_dict()
+        #self.dict_dict_processed.index = pd.to_datetime(df_doy_processed["time"]).dt.date
+        #print (self.dict_doy_processed)
+        #sys.exit()
+        
+        for f_rinex_nav in self.list_f_rinex_nav:
+            #print (f_rinex_nav)
+            nav = gr.load(f_rinex_nav)
+            head = nav.head()
+            svtype = head.svtype[0]
+            
+            df_nav = nav.to_dataframe()
+            #print (df_nav)
             df_nav.index.set_names(["time","sv"],inplace=True)
             df_nav.reset_index(level=["sv"],inplace=True)
             df_nav.dropna(inplace=True)
-       
-            # Iter over all the satellites
-            for i in range(1,33):
-                #Name of the satellite
-                sat = ""
-                if i<10: sat = "G0"+str(i)
-                else: sat = "G"+str(i)
 
-                # flag to know if position of satellite has already been computed for this doy
-                is_doy_reported = df_doy_reported[str(rinex_doy)].loc[sat]==1
-            
-                # flag to know if the resolution is fine
-                is_res_enough = df_doy_reported["res"].loc[sat]<=self.resolution
+            df_nav.index = pd.to_datetime(df_nav.index)
 
-                # If this doy has been reported with enough time-resolution, got for next satellite
-                if is_doy_reported and is_res_enough: continue
+            date = df_nav.index[int(len(df_nav)/2)].date()
+            #print ("date",f_rinex_nav,date)
+
             
-                # import data of this satellite
-                df_sat_new = df_nav[df_nav["sv"]==sat][list_cols]          
+            df_nav.sort_index(ascending=True,inplace=True)
+            #print (df_nav)
+            #filename = head.filename
+            #df_nav["sta"]  = filename[:4]
+            if svtype=='R':
+                if date in self.dict_doy_processed.keys():
+                    #if self.dict_doy_processed[date]["R_res"]==0: continue
+                    if self.dict_doy_processed[date]["R_res"]>=self.resolution: continue
+                self.df_nav_glonass = pd.concat([self.df_nav_glonass,df_nav[["sv","X","Y","Z"]]])
+            elif svtype=='G':
+                if date in self.dict_doy_processed.keys():
+                    #if self.dict_doy_processed[date]["G_res"]==0: continue
+                    if self.dict_doy_processed[date]["G_res"]>=self.resolution: continue
+                self.df_nav_gps = pd.concat([self.df_nav_gps,df_nav])
+
+        self.compute_gps_pos()
+        self.compute_glonass_pos()
+
+        df_doy_processed = pd.DataFrame(self.dict_doy_processed)
+        df_doy_processed = df_doy_processed.transpose()
+        #print (df_doy_processed)
+        df_doy_processed.index.set_names(["time"],inplace=True)
+        df_doy_processed.sort_index(inplace=True)
+        #print (df_doy_processed)
+        df_doy_processed.to_csv(self.csv_record_processing,index=True)
+
+    def compute_gps_pos(self):
+        if (len(self.df_nav_gps)<=2): return
+
+        print ("GPS POS")
+        #self.df_nav_gps.index.set_names(["time","sv"],inplace=True)
+        #self.df_nav_gps.reset_index(level=["sv"],inplace=True)
+        #self.df_nav_gps.dropna(inplace=True)
+
+        #self.df_nav_gps.index = pd.to_datetime(self.df_nav_gps.index)
+        #self.df_nav_gps.sort_index(ascending=True,inplace=True)
+        
+        list_sv = self.df_nav_gps["sv"].unique().tolist()
+        self.df_nav_gps = self.df_nav_gps.groupby(["time","sv"]).mean()
+        self.df_nav_gps.reset_index(level=["sv"],inplace=True)
+        list_times = []#self.df_nav_gps.index
+        
+        for sv in list_sv:
+            df_sat = self.df_nav_gps[self.df_nav_gps["sv"]==sv]
+            if len(df_sat)<3: continue
+            #df_sat_new = df_sat_new.groupby(["time","sv"]).mean()
+            #df_sat_new.reset_index(level=["sv"],inplace=True)
+            df_sat = removeOutsiders(df_sat)
+            list_times = list_times+df_sat.index.tolist()
+
+            # If no data has been found for this satellite, go for next one without creating the feather
+            #if len(df_sat)==0:
+            #    print ("No position for satellite",sv)
+            #    continue
+                
+            min_date = min(df_sat.index)
+            max_date = max(df_sat.index)
             
-                # If no data has been found for this satellite, go for next one without creating the feather
-                if len(df_sat_new)==0:
-                    print ("No position for satellite",sat)
-                    continue
-            
-                # File correponding to satellite of interest
-                csv_nav_sat = year_gpsdir + "/" + sat + ".feather"
-            
-                # Intermediate dictionnary intended to contain data of the satellite under process 
-                dict_sat_pos = {"time":[],"X":[],"Y":[],"Z":[]}
-            
-                # Iterator of time list of positions to be computed
-                i_time_list = 0
-                # Get first time
-                date = time_list[i_time_list]
-            
-                # Iter over the times available in the navigation file
-                for t_nav, row in df_sat_new.iterrows():
-                    # Calculate position for each time in time_list that are before the next available position information
-                    while date < t_nav and i_time_list<len(time_list):
-                        sat_pos = gps_nav_to_XYZ(row,date)
-                        dict_sat_pos["time"].append(date)
-                        dict_sat_pos["X"].append(sat_pos[0])
-                        dict_sat_pos["Y"].append(sat_pos[1])
-                        dict_sat_pos["Z"].append(sat_pos[2])
-                        i_time_list += 1
-                        if i_time_list==len(time_list): break
-                        date = time_list[i_time_list]
-                last_row = df_sat_new.iloc[-1]
-            
-                # Case novigation data does not provide position until 00:00, use last available date
-                while i_time_list<len(time_list):
-                    sat_pos = gps_nav_to_XYZ(last_row,date)
+            gps_time_list = []
+            t = min_date
+                        
+            while t<=max_date:
+                gps_time_list.append(t)
+                t = t+datetime.timedelta(seconds=self.resolution)
+
+            #print (self.gps_time_list)
+            i_time_list = 0
+            date = gps_time_list[i_time_list]
+            # Intermediate dictionnary intended to contain data of the satellite under process 
+            dict_sat_pos = {"time":[],"X":[],"Y":[],"Z":[]}
+            for t_nav, row in df_sat.iterrows():
+                # Calculate position for each time in time_list that are before the next available position information
+                while date < t_nav and i_time_list<len(gps_time_list):
+                    sat_pos = gps_nav_to_XYZ(row,date)
                     dict_sat_pos["time"].append(date)
                     dict_sat_pos["X"].append(sat_pos[0])
                     dict_sat_pos["Y"].append(sat_pos[1])
                     dict_sat_pos["Z"].append(sat_pos[2])
                     i_time_list += 1
-                    if i_time_list==len(time_list): break
-                    date = time_list[i_time_list]
-            
-                df_sat_nav = pd.DataFrame(dict_sat_pos)
-                df_sat_nav.set_index("time",inplace=True)
-            
-                # Check if feather file is not already there in order not to use navigation file
+                    if i_time_list==len(gps_time_list): break
+                    date = gps_time_list[i_time_list]
+
+            # Case navigation data does not provide position until 00:00, use last available date 
+            while i_time_list<len(gps_time_list):
+                sat_pos = gps_nav_to_XYZ(row,date)
+                dict_sat_pos["time"].append(date)
+                dict_sat_pos["X"].append(sat_pos[0])
+                dict_sat_pos["Y"].append(sat_pos[1])
+                dict_sat_pos["Z"].append(sat_pos[2])
+                i_time_list += 1
+                if i_time_list==len(gps_time_list): break
+                date = gps_time_list[i_time_list]
+
+            df_sat = pd.DataFrame(dict_sat_pos)
+            df_sat["time"] = pd.to_datetime(df_sat["time"])
+            df_sat.set_index("time",inplace=True)
+            #df_sat.reset_index(inplace=True)
+            #print (df_sat)
+            list_years = list({d.year for d in df_sat.index.tolist()})
+            for y in list_years:
+                df_year = df_sat[df_sat.index.year == y].dropna()
+                csv_nav_sat = self.gnss_dir + str(y) + "/" + sv + ".feather"
+                if not os.path.exists(self.gnss_dir + str(y)): os.mkdir(self.gnss_dir + str(y))
+                #df_sat.to_feather(csv_nav_sat)
+                #csv_nav_sat = self.gnss_dir + str(y) + "/" + sv + ".csv"
+                #print (csv_nav_sat)
                 if os.path.exists(csv_nav_sat):
-                    #print (csv_nav_sat, "file exist, concat with new results")
-                    df_sat_old = pd.read_feather(csv_nav_sat) 
-                    df_sat_old.set_index("time",inplace=True)
-                    df_sat_old.index = pd.to_datetime(df_sat_old.index)
-                    df_sat_nav = pd.concat([df_sat_nav,df_sat_old])
-                          
-                df_sat_nav.reset_index(inplace=True)
-                df_sat_nav.to_feather(csv_nav_sat)
-            
-                # Report that this doy has been treated with the corresponding resolution to avoid reprocessing
-                df_doy_reported[str(rinex_doy)].loc[sat]=1
-                df_doy_reported["res"].loc[sat]=self.resolution
+                    df_former_sat = pd.read_feather(csv_nav_sat)
+                    df_sat = pd.concat([df_sat,df_former_sat])
+                    #print (df_sat)
+                df_sat.to_feather(csv_nav_sat)
+
+        list_times = sorted(list(set(list_times)))
+        #list_times = sorted(list_times)
+        self.inform_date_processed(list_times,'G')
+
+    
+    def compute_glonass_pos(self):
+        if (len(self.df_nav_glonass)<=2): return
+
+        print ("GLONASS POS")
+        #self.df_nav_glonass.index.set_names(["time","sv"],inplace=True)
+        #self.df_nav_glonass.reset_index(level=["sv"],inplace=True)
+        #self.df_nav_glonass.dropna(inplace=True)
         
-            # Update report file
-            df_doy_reported.reset_index(inplace=True)
-            df_doy_reported.to_feather(f_doy_reported)
+        #self.df_nav_glonass.index = pd.to_datetime(self.df_nav_glonass.index)
+        #self.df_nav_glonass.sort_index(ascending=True,inplace=True)
+
+        #min_date = min(self.df_nav_glonass.index)
+        #max_date = max(self.df_nav_glonass.index)
+
+        #self.glonass_time_list = []
+        #t = min_date
+        #while t<=max_date:
+        #    self.glonass_time_list.append(t)
+        #    t = t+datetime.timedelta(seconds=self.resolution)
+        #print (self.glonass_time_list)
+        #self.df_nav_glonass = self.df_nav_glonass[["sv","X","Y","Z","dX","dY","dZ","dX2","dY2","dZ2"]]#.iloc[8:38]
+        #self.df_nav_glonass = self.df_nav_glonass[["sv","X","Y","Z"]]#.iloc[8:38]
+        #pd.set_option('display.precision', 15)
+        self.df_nav_glonass = self.df_nav_glonass.groupby(["time","sv"]).mean()
+        self.df_nav_glonass.reset_index(level=["sv"],inplace=True)
+        list_times = self.df_nav_glonass.index
+        
+        list_sv = self.df_nav_glonass["sv"].unique().tolist()
+        for sv in list_sv:
+            df_sat = self.df_nav_glonass[self.df_nav_glonass["sv"]==sv]
+            if len(df_sat)<3: continue
+
+            #print (df_sat)
+            df_sat = removeOutsiders(df_sat)
+            if len(df_sat)<3: continue
+
+            min_date = min(df_sat.index)
+            max_date = max(df_sat.index)
+            glonass_time_list = []
+            t = min_date
+            while t<=max_date:
+                glonass_time_list.append(t)
+                t = t+datetime.timedelta(seconds=self.resolution)            
             
+            new_index = df_sat.index.union(glonass_time_list)
+            df_interp = df_sat.reindex(new_index).sort_index()
+            #print (self.time_list)
+            df_interp = df_interp[['X','Y','Z']].interpolate(method='quadratic',axis=0)
+            list_years = list({d.year for d in df_interp.index.tolist()})
+            for y in list_years:
+                df_year = df_interp[df_interp.index.year == y].dropna()
+                csv_nav_sat = self.gnss_dir + str(y) + "/" + sv + ".feather"
+                if not os.path.exists(self.gnss_dir + str(y)): os.mkdir(self.gnss_dir + str(y))
+                if os.path.exists(csv_nav_sat):
+                    df_former_sat = pd.read_feather(csv_nav_sat)
+                    df_year = pd.concat([df_year,df_former_sat])
+                df_year.to_feather(csv_nav_sat)  
+                
+        self.inform_date_processed(list_times,'R')
 
         
- 
+            
+    # Function that loads the satellite of a specific year, files must exist, otherwise load empty
+    def load_sats(self,d_in,d_out):
+
+        '''
+            Constellation: G: GPS
+                            R: GLONASS
+                            E: GALILEO
+        '''
+    
+        year = d_in.year
+        first = True
+
+        nsat = 36
+         
+        for n_sat,g in [(self.n_sat_gps,"G"),(self.n_sat_glonass,"R"),(self.n_sat_galileo,"E")]:
+            for i in range(1,n_sat+1):
+                #Name of the satellite
+                sat = ""
+                if i<10: sat = g+"0"+str(i)
+                else: sat = g+str(i)
+    
+                sat_file = self.gnss_dir + str(year) + "/" + sat + ".feather"
+                #sat_file = self.gps_dir + str(year) + "/" + sat + ".csv"
+    
+                if os.path.exists(sat_file):
+                    self.dict_df_pos[sat] = pd.read_feather(sat_file)
+                    #self.dict_df_pos[sat] = pd.read_csv(sat_file)
+                    #print (sat)
+                    #print (self.dict_df_pos[sat])
+                    #self.dict_df_pos[sat].set_index("time",inplace=True)
+                    self.dict_df_pos[sat].index = pd.to_datetime(self.dict_df_pos[sat].index)
+                    mask = (self.dict_df_pos[sat].index>=d_in) & (self.dict_df_pos[sat].index<=d_out)
+                    self.dict_df_pos[sat]=self.dict_df_pos[sat].loc[mask]
+                    if first:
+                        self.df_pos = self.dict_df_pos[sat]
+                        self.df_pos["sv"] = sat
+                        first = False
+                    else:
+                        df_inter = self.dict_df_pos[sat]
+                        df_inter["sv"] = sat
+                        self.df_pos = pd.concat([self.df_pos,df_inter])
+                else:
+                    self.dict_df_pos[sat] = pd.DataFrame()
+
     
     def getElevation(self,df,pos_antena):
 
@@ -436,380 +594,6 @@ class gnss:
         df["lat"],df["lon"],df["alt"] = pm.ecef2geodetic(df_inter["pos_ion_X"],df_inter["pos_ion_Y"],df_inter["pos_ion_Z"])
         return df
 
-        #return 1.0, [20000000,2000000,-1000000]
-        #pos_sat=self.getPosdf(df)
-    def getElevation_old(self,sat,pos_antena,date,mode="RAD"):   
-        n = np.array([pos_antena[0],pos_antena[1],pos_antena[2]])
-        v = np.array([pos_sat[0]-pos_antena[0],pos_sat[1]-pos_antena[1],pos_sat[2]-pos_antena[2]])
-        nv = np.dot(n,v)
-        sin_phi = nv/(np.linalg.norm(n)*np.linalg.norm(v))
-        return math.asin(sin_phi),pos_sat
-
-
-    # Read position from saved files
-    # Not working but not used
-    def getPos(self,df):
-        
-        print (self.df_pos)
-        print (df)
-        print (pd.merge(df,self.df_pos,how='left',on=['sv','time']))
-        sys.exit()
-        
-        if len(self.dict_df_pos[sat])==0: 
-            return [float("NaN"),float("NaN"),float("NaN")]
-
-        if date not in self.dict_df_pos[sat].index: 
-            return [float("NaN"),float("NaN"),float("NaN")]
-
-        pos = self.dict_df_pos[sat][["X","Y","Z"]].loc[date].tolist()
-       
-        return pos  
-
-          
-    #### Old function, should not be used anymore
-    def to_CSV(self,date,feather=True):
-        #resetCSV(date,feather)
-        #print ("In resetcsv",gps_dir)
-                
-        year_gpsdir = self.gps_dir + str(date.year)
-        if not os.path.exists(year_gpsdir):
-            try: os.mkdir(year_gpsdir)
-            except OSError as e:
-                if e.errno!=17: print ("FAIL creation of directory "+year_gpsdir, e )
-                else: print ("Successfully created the directory "+year_gpsdir)
-                
-        #Annex file reporting doy that have been considered for each satellite
-        f_doy_reported = self.gps_dir + str(date.year) + "/reported_doy.feather"
-        if not os.path.exists(f_doy_reported):
-            dict_doy_reported = {"sat":[]}
-            for doy in range(366):
-                dict_doy_reported[str(doy)] = []
-            for i in range(1,33):
-                #Name of the satellite
-                sat = ""
-                if i<10: sat = "G0"+str(i)
-                else: sat = "G"+str(i)
-                dict_doy_reported["sat"].append(sat)
-                
-                for doy in range(366):
-                    dict_doy_reported[str(doy)].append(0)
-            pd.DataFrame(dict_doy_reported).to_feather(f_doy_reported)
-        
-        
-        df_doy_reported = pd.read_feather(f_doy_reported)
-        df_doy_reported.set_index("sat",inplace=True)
-	
-        print (df_doy_reported)
-
-        try:
-            nav = gr.load(self.f_rinex_nav)
-            df_nav = nav.to_dataframe()
-        except ValueError:
-            print ("COuld not load file", self.f_rinex_nav)
-        
-        df_nav.index.set_names(["time","sv"],inplace=True)
-        df_nav.reset_index(level=["sv"],inplace=True)
-        df_nav.dropna(inplace=True)
-         
-        list_cols = ["Toe","TGD","IDOT","IODC","GPSWeek","TransTime","SVclockBias","SVclockDrift",\
-        "SVclockDriftRate","sqrtA","Eccentricity","Io","Omega0","omega","M0","DeltaN","OmegaDot","Cus","Cuc",\
-        "Cis","Crs","Crc","Cic"]
-         
-        for i in range(1,33):
-            #Name of the satellite
-            sat = ""
-            if i<10: sat = "G0"+str(i)
-            else: sat = "G"+str(i)
-
-            is_doy_reported = df_doy_reported[str(self.doy)].loc[sat]==1
-
-            # If this doy for this sat has been reported skip it
-            if is_doy_reported: continue
-                 
-            # import data of this satellite
-            df_sat_new = df_nav[df_nav["sv"]==sat][list_cols]
-            # If other doys have been reported, we want to add the new doy to them
-            if os.path.exists(year_gpsdir+"/"+sat+".feather"):
-                df_sat = pd.read_feather(year_gpsdir+"/"+sat+".feather")
-                df_sat.index = df_sat["time"]  
-                df_sat_new = pd.concat(df_sat_new,df_sat)
-            df_sat_new.reset_index(inplace=True)
-            df_sat_new.to_feather(year_gpsdir+"/"+sat+".feather")
-            
-            # Report that this doy has been treated to no repeat
-            df_doy_reported[str(self.doy)].loc[sat]=1
-        df_doy_reported.reset_index(inplace=True)
-        df_doy_reported.to_feather(f_doy_reported)
-
-    #### Old function, should not be used anymore
-    def getPos2(self,sat,date):
-        doy = str(date.timetuple().tm_yday)
-        year = str(date.year)
-        
-        # File correponding to satellite of interest
-        csv_nav_sat = st.root_dir + "GPS/" + str(date.year) + "/" + sat + ".feather"
-        
-        # Check if feather file is not already there in order not to use navigation file
-        if not os.path.exists(csv_nav_sat):
-            print (csv_nav_sat, "does not exist")
-            self.to_CSV(date)
-        df_sat_nav = pd.read_feather(csv_nav_sat) 
-        df_sat_nav.set_index("time",inplace=True)
-        df_sat_nav.index = pd.to_datetime(df_sat_nav.index)
-         
-        dt=datetime.timedelta(days=2)
-        closest_t = date
-        
-        if len(df_sat_nav)==0:
-            print ("Position of sat ", sat, "unknown at",date )
-            return [float("NaN"),float("NaN"),float("NaN")]
-        
-        for t in df_sat_nav.index:
-            # Test for dates before time seeked
-            #if d<t:
-            if (t-date)<dt:
-                closest_t = t
-                dt = t-date
-                
-        #print (sat,t)
-        data = df_sat_nav.loc[t]    
-
-        return gps_nav_to_XYZ(data,date)    
-        
-
-
-
-    # return elevation of satellite given the ID os the satellite, the position of the antenna.
-    def getElevation_old(self,sat,pos_antena,date,mode="RAD"):
-        #return 1.0, [20000000,2000000,-1000000]
-        pos_sat=self.getPos(sat,date)
-        n = np.array([pos_antena[0],pos_antena[1],pos_antena[2]])
-        v = np.array([pos_sat[0]-pos_antena[0],pos_sat[1]-pos_antena[1],pos_sat[2]-pos_antena[2]])
-        nv = np.dot(n,v)
-        sin_phi = nv/(np.linalg.norm(n)*np.linalg.norm(v))
-        return math.asin(sin_phi),pos_sat
-
-
-def get_pos_antenna(station,year,doy):
-    df_antennas = pd.read_csv(st.root_dir+str(year)+"/"+str(doy)+"/antennas.csv")
-    df_antennas.set_index("station",inplace=True)
-    pos_antena = []
-    pos_antena.append(df_antennas.loc[station,"x"])
-    pos_antena.append(df_antennas.loc[station,"y"])
-    pos_antena.append(df_antennas.loc[station,"z"])
-    return pos_antena
-
-def getPiercingPoint_old(pos_antena,pos_sat,h=400000):
-    R_I = R_E + h
-    #### Calculation of the position of the intersection of Satellite-Antena line with ionosphere which is a second degree equation
-    Xas = pos_sat[0]-pos_antena[0]
-    # return elevation of satellite given the ID os the satellite, the position of the antenna.
-    Yas = pos_sat[1]-pos_antena[1]
-    Zas = pos_sat[2]-pos_antena[2]
-    AS_squared = Xas**2 + Yas**2 + Zas**2
-    #Parameters of the polynomial to solve
-    a_poly = AS_squared
-    b_poly = 2*Xas*(pos_antena[0]*Xas + pos_antena[1]*Yas + pos_antena[2]*Zas)
-    c_poly = Xas**2 * ( pos_antena[0]**2 + pos_antena[1]**2+ pos_antena[2]**2 - R_I**2 )
-    Delta = b_poly**2 - 4*a_poly * c_poly
-    x_ion, y_ion, z_ion = float('nan'),float('nan'),float('nan')
-    pos_ion = [float('nan'),float('nan'),float('nan')]
-    if Delta > 0:
-        x_ion_1 = (-b_poly+np.sqrt(Delta))/(2*a_poly) + pos_antena[0]
-        y_ion_1 = Yas/Xas*(x_ion_1-pos_antena[0])+pos_antena[1]
-        z_ion_1 = Zas/Xas*(x_ion_1-pos_antena[0])+pos_antena[2]
-
-        x_ion_2 = (-b_poly-np.sqrt(Delta))/(2*a_poly) + pos_antena[0]
-        y_ion_2 = Yas/Xas*(x_ion_2-pos_antena[0])+pos_antena[1]
-        z_ion_2 = Zas/Xas*(x_ion_2-pos_antena[0])+pos_antena[2]
-
-        # point must be between satellite and antena, este must be the other solution
-        X1xposAntena=(x_ion_1-pos_antena[0])*Xas + (y_ion_1-pos_antena[1])*Yas + (z_ion_1-pos_antena[2])*Zas
-        X2xposAntena=(x_ion_2-pos_antena[0])*Xas + (y_ion_2-pos_antena[1])*Yas + (z_ion_2-pos_antena[2])*Zas
-        if X1xposAntena<0 or (X1xposAntena>0 and X2xposAntena>0 and X2xposAntena<X1xposAntena): pos_ion = [x_ion_2,y_ion_2,z_ion_2]
-        else: pos_ion = [x_ion_1,y_ion_1,z_ion_1]
-    elif Delta==0:
-        x_ion = -b_poly/(2*a_poly)
-        pos_ion = [x_ion,Yas/Xas*(x_ion-pos_antena[0])+pos_antena[1],Zas/Xas*(x_ion-pos_antena[0])+pos_antena[2]]
-    return pos_ion
-
-def resetCSV(date,feather=True):
-    gps_dir = st.root_dir + "GPS/" #str(date.year)+"/"+ str(date.timetuple().tm_yday) +"/GPS/"
-    print ("In resetcsv",gps_dir)
-    try: os.mkdir(gps_dir)
-    except OSError as e:
-        if e.errno!=17: print ("FAIL creation of directory "+gps_dir, e )
-    else: print ("Successfully created the directory "+gps_dir)
-    year_gpsdir = gps_dir + str(date.year)
-    try: os.mkdir(year_gpsdir)
-    except OSError as e:
-        if e.errno!=17: print ("FAIL creation of directory "+year_gpsdir, e )
-    else: print ("Successfully created the directory "+year_gpsdir)
-    #for n_sat in range(1,33):
-    #    if n_sat<10: sat = "G0" + str(n_sat)
-    #    else: sat = "G" + str(n_sat)
-    #    sat_dir = gps_dir+sat
-    #    try: os.mkdir(sat_dir)
-    #    except OSError as e:
-    #        if e.errno!=17: print ("FAIL creation of directory "+gps_dir, err)
-    #    else: print ("Successfully created the directory "+sat_dir)
-    #    for filename in os.listdir(sat_dir):
-    #        file_path = os.path.join(sat_dir, filename)
-    #        try:
-    #            if os.path.isfile(file_path) or os.path.islink(file_path): os.unlink(file_path)
-    #            elif os.path.isdir(file_path): shutil.rmtree(file_path)
-    #        except Exception as e: print('Failed to delete %s. Reason: %s' % (file_path, e))
-
-
-
-
-def getGPSSatPosition(sat,d,pos_antena=None):
-	#csv_nav_dir = dir_rinex_nav + "GPS/" + sat + "/"
-	csv_nav_dir = st.root_dir + str(d.year)+"/"+ str(d.timetuple().tm_yday) +"/" + "GPS/" + sat + "/"
-	if not os.path.isdir(csv_nav_dir):
-		print (f"Calculating RINEX navigation to csv for year:{d.year}, doy:{d.timetuple().tm_yday}")
-		makeCSV(d)
-		print ("...Done")
-	nav_csv_files = [f for f in listdir(csv_nav_dir) if isfile(join(csv_nav_dir, f))]
-	if len(nav_csv_files)==0:
-		print (f"Calculating RINEX navigation to csv for year:{d.year}, doy:{d.timetuple().tm_yday}")
-		makeCSV(d)
-		print ("...Done")
-		nav_csv_files = [f for f in listdir(csv_nav_dir) if isfile(join(csv_nav_dir, f))]
-	csv_nav = csv_nav_dir+nav_csv_files[0]
-
-	df_data = pd.read_csv(csv_nav)
-	df_data["time"]=pd.to_datetime(df_data["time"])
-	df_data.set_index("time",inplace=True)
-	dt=datetime.timedelta(days=2)
-	closest_t = d
-	for t in df_data.index:
-		# Test for dates before time seeked
-		#if d<t:
-		if (t-d)<dt:
-			closest_t = t
-			dt = t-d
-
-	data = df_data.loc[t]
-	Toe = data['Toe']
-	TGD = data['TGD']
-	IDOT = data['IDOT']
-	IODC = data['IODC']
-	GPSWeek = data['GPSWeek']
-	TransTime = data['TransTime']
-	#clock correction biais
-	clockBiais = data['SVclockBias']
-	#clock correction drift
-	clockDrift = data['SVclockDrift']
-	#clock correction drift rate
-	clockDriftRate = data['SVclockDriftRate']
-	#Square root of the semi-major axis m^{1/2}
-	sqrtA =  data['sqrtA']
-	#Eccentricity
-	Eccentricity =  data['Eccentricity']
-	#Inclination angle at reference time
-	Io =  data['Io']
-	#Longitude of ascending node at reference time
-	Omega0 =  data['Omega0']
-	#Argument of perigee (semicircles)
-	omega = data['omega']
-	#Mean anomaly at reference time (semicircles)
-	M0 = data['M0']
-	#Mean motion difference from computed value
-	DeltaN = data['DeltaN']
-	#Rate of change of right ascension
-	OmegaDot = data['OmegaDot']
-	#Rate of change of inclination
-	IDOT = data['IDOT']
-	#Amplitude of the sine harmonic correction term to the argument of latitude (rad)
-	Cus = data['Cus']
-	#Amplitude of the cosine harmonic correction term to the argument of latitude (rad)
-	Cuc = data['Cuc']
-	#Amplitude of the sine harmonic correction term to the angle of inclination (rad)
-	Cis = data['Cis']
-	#Amplitude of the cosine harmonic correction term to the angle of inclination (rad)
-	Cic = data['Cic']
-	#Amplitude of the sine harmonic correction term to the orbit radius (m)
-	Crs = data['Crs']
-	#Amplitude of the cosine harmonic correction term to the orbit radius (m)
-	Crc = data['Crc']
-
-	d0 = getDateFromSat(GPSWeek,Toe)
-
-	tk = (d-d0).seconds
-
-	n0 = math.sqrt(GM)/sqrtA**3
-	n = n0 + DeltaN
-
-	Mk = M0 + n*tk
-	Ek = Mk
-	for i in range(3): Ek = Mk + Eccentricity*math.sin(Ek)
-
-	sin_vk = math.sqrt(1-Eccentricity**2)*math.sin(Ek) / (1.0-Eccentricity*math.cos(Ek))
-	cos_vk = (math.cos(Ek)-Eccentricity)/(1.0-Eccentricity*math.cos(Ek))
-	vk=0
-	if sin_vk>0: vk = math.acos(cos_vk)
-	else: vk = -math.acos(cos_vk)
-
-	Phik = vk + omega
-	delta_uk = Cuc * math.cos(2*Phik) + Cus * math.sin(2*Phik)
-	delta_rk = Crc * math.cos(2*Phik) + Crs * math.sin(2*Phik)
-	delta_ik = Cic * math.cos(2*Phik) + Cis * math.sin(2*Phik)
-
-	uk = Phik + delta_uk
-	rk = sqrtA**2 * (1 - Eccentricity * math.cos(Ek)) + delta_rk
-	ik = Io + IDOT*tk + delta_ik
-
-	Xk_p = rk * math.cos(uk)
-	Yk_p = rk * math.sin(uk)
-
-	Omegak = Omega0 + (OmegaDot-omega_e)*tk - omega_e * Toe
-
-	Xk = Xk_p * math.cos(Omegak) - Yk_p * math.sin(Omegak)* math.cos(ik)
-	Yk = Xk_p * math.sin(Omegak) + Yk_p * math.cos(Omegak)* math.cos(ik)
-	Zk = Yk_p * math.sin(ik)
-	return [Xk,Yk,Zk]
-
-
-
-def getElevation(sat,pos_antena,date,mode="RAD"):
-	#return 1.0, [20000000,2000000,-1000000]
-	pos_sat=getGPSSatPosition(sat,date,pos_antena)
-	n = np.array([pos_antena[0],pos_antena[1],pos_antena[2]])
-	v = np.array([pos_sat[0]-pos_antena[0],pos_sat[1]-pos_antena[1],pos_sat[2]-pos_antena[2]])
-	nv = np.dot(n,v)
-	sin_phi = nv/(np.linalg.norm(n)*np.linalg.norm(v))
-	if mode=="DEG": return math.asin(sin_phi)*180.0/math.pi, pos_sat
-	return math.asin(sin_phi),pos_sat
-
-def getBias(sat,date,mode="P1P2"):
-	if mode=="P1P2": filename = mode+date.strftime("%y%m")+".DCB"
-	elif mode=="P1C1": filename = mode+date.strftime("%y%m")+".DCB"
-	path_local_file = st.root_dir + str(date.year)+"/"+ str(date.timetuple().tm_yday) +"/" + filename
-	if not os.path.exists(path_local_file):
-		compressed_file = filename + ".Z"
-		url_compressed_file = "http://ftp.aiub.unibe.ch/CODE/" + str(date.year) + "/" + compressed_file
-		path_compressed_file = dir_sat_bias + compressed_file
-		#print (path_local_file)
-		try:
-			print ("Download " + compressed_file)
-			urllib.request.urlretrieve(url_compressed_file,path_compressed_file)
-		except urllib.error.URLError as e:
-			print ("Problem in retrieving: " + url_compressed_file +"\n" + e.reason)
-			return 0
-		with open(path_compressed_file,'rb') as fh:
-			f=open(path_local_file,"w")
-			f.write(unlzw(fh.read()).decode("utf-8"))
-			f.close()
-		os.remove(path_compressed_file)
-	f = open(path_local_file)
-	for lin in f:
-		splt_lin = lin.split()
-		if len(splt_lin)==0: continue
-		if splt_lin[0]!=sat: continue
-		else: return float(splt_lin[1])
-	print ("No biais found")
-	return 0.0
 
 def getBias_fromfile(sat,f_bias):
     path_local_file = f_bias
@@ -819,7 +603,7 @@ def getBias_fromfile(sat,f_bias):
          if len(splt_lin)==0: continue
          if splt_lin[0]!=sat: continue
          else: return float(splt_lin[1])
-    print ("No biais found")
+    print ("No bias found for "+sat)
     return 0.0
 
 
@@ -832,7 +616,9 @@ def getBias_fromfile(sat,f_bias):
 		- "full": True if begining and end of arc is contained is the time serie, if truncated, False
 	Input: pandas Serie of elevations with time index.
 		t_begin and t_end are to indicate time borders of the time serie.
+
 '''
+
 def get_arcs(elevations,t_begin=None,t_end=None):
     elevations = elevations.dropna()
     values = elevations.values

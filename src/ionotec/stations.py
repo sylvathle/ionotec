@@ -28,6 +28,8 @@ import georinex as gr
 import pandas as pd
 import numpy as np
 
+import pymap3d as pm
+
 from os import listdir, getenv, path, makedirs
 from os.path import isfile, join
 
@@ -42,7 +44,7 @@ base_dir = Path(sys.argv[0]).resolve().parent
 target_dir = base_dir / "output/"
 target_dir.mkdir(parents=True, exist_ok=True)
 root_dir = str(target_dir)+"/"
-print ("root_dir", root_dir)
+#print ("root_dir", root_dir)
 
 def create_output(folder_name: str) -> Path:
     """
@@ -65,19 +67,60 @@ def create_output(folder_name: str) -> Path:
 
 csv_stations = root_dir+"stations.csv"
 
-def resume_station(year,force=False):
+def resume_station(folder,year,doy,out_csv,force=False):
     '''  Function not coordinated by now with only code
     Creates stations.csv that contains information about the navigation
     stations
     '''
+    doyfolder = folder+str(year)+"\\"+str(doy)+"\\"
+    print ("LIST stations")
+    files = [f for f in listdir(doyfolder) if isfile(join(doyfolder, f))]
+    print (files)
+    d = {"station":[],"X":[],"Y":[],"Z":[],"resolution(s)":[]}
+    for f in files:
+        print (f)
+        if f[-1]!="o": continue
+        station = f[:4]
+        if station in d["station"]: continue
+        if ((station+str(doy)+"0."+str(year)[2:]+"o" not in files) and
+            (station+str(doy)+"1."+str(year)[2:]+"o" not in files)): continue
+
+        rinex = station + str(doy) + "0." + str(year)[2:]
+
+        try: header = gr.rinexheader(doyfolder+rinex+"o")
+        except ValueError:
+            print ("Error in file",f)
+        if "INTERVAL" in header.keys(): interval = float(header["INTERVAL"].replace(" ",""))
+        else: interval = 1.0
+        pos_antena = header['position']
+        d["station"].append(station)
+        d["X"].append(pos_antena[0])
+        d["Y"].append(pos_antena[1])
+        d["Z"].append(pos_antena[2])
+        d["resolution(s)"].append(interval)
+        #d["br"].append(float("nan"))
     
+
+    df = pd.DataFrame(d)
+    df["lat"],df["lon"],df["alt"] = pm.ecef2geodetic(df["X"],df["Y"],df["Z"])
+    df.sort_values(by="station",inplace=True)
+    df.to_csv(out_csv,index=False)
+
+
+#def resume_station(year_folder,force=False):
+#    '''  Function not coordinated by now with only code
+#    Creates stations.csv that contains information about the navigation
+#    stations
+#    '''
+
+'''   
     print ("LIST stations")
     
     if path.exists(csv_stations) and not force: return
-    year_folder = root_dir + str(year)+ "/"
+    #year_folder = root_dir + "TEC/" + str(year)+ "/"
     for f in listdir(year_folder):
         doy = f.replace(".zip","")
-        day_folder = year_folder+ doy + "/"
+        day_folder = year_folder + doy + "/"
         print (day_folder)
 
         files = [f for f in listdir(day_folder) if isfile(join(day_folder, f))]
@@ -107,6 +150,9 @@ def resume_station(year,force=False):
     df = pd.DataFrame(d)
     df.sort_values(by="station",inplace=True)
     df.to_csv(csv_stations,index=False)
+'''
+
+
 
 def get_closest_stations(p):
     ''' Input: list of three float corresponding to the (X,Y,Z) coordinates

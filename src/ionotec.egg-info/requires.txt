@@ -1,0 +1,8 @@
+georinex
+numpy
+pandas
+pymap3d
+datetime
+scipy
+pyarrow
+matplotlib

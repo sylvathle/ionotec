@@ -1,3 +1,26 @@
+Metadata-Version: 2.4
+Name: ionotec
+Version: 0.0.11
+Summary: Code calculating TEC from RINEX information
+Author-email: Sylvain Blunier <sylvain.blunier@gmail.com>
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/sylvathle/ionotec
+Project-URL: Issues, https://github.com/sylvathle/ionotec/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: georinex
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: pymap3d
+Requires-Dist: datetime
+Requires-Dist: scipy
+Requires-Dist: pyarrow
+Requires-Dist: matplotlib
+Dynamic: license-file
+
 # ionotec
 Python library for Total Electron Content computing from Rinex files
 
