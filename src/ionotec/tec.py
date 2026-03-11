@@ -192,6 +192,8 @@ class tec:
     sv_gps = []
     sv_glonass = []
     sv_galileo = []
+
+    is_gnss_processed = False
     
     def __init__(self,list_f_obs,f_nav,f_sat_bias,outfolder="output",resolution=60,h=400000):
     
@@ -266,6 +268,7 @@ class tec:
             except OSError as e:
                     if e.errno!=17: print ("FAIL creation of directory "+st.root_dir + "TEC/", e )
             #else: print ("Successfully created the directory "+st.root_dir + "TEC/")
+        self.gps = gnss.gnss(self.f_nav)
 
     def getAlpha(self,sv):
         if sv[0]=="G": return self.gps_alpha
@@ -331,7 +334,10 @@ class tec:
         df_glonass_temp.reset_index(level=["sv"],inplace=True)
         df_glonass_temp.index = pd.to_datetime(df_glonass_temp.index)
 
+        if len(df_glonass_temp)==0: return
+        
         list_sv = df_glonass_temp['sv'].unique().tolist()
+        if len(list_sv)==0: return
         
         for sv in list_sv:
             df_sat_glo  = df_glonass_temp[df_glonass_temp["sv"]==sv]
@@ -426,14 +432,14 @@ class tec:
 
     def add_satellite_pos(self):
         #time_list =  self.df_obs.index
-        gps = gnss.gnss(self.f_nav)
+        
         
         d_in, d_out = min(self.df_obs.index), max(self.df_obs.index)
-        gps.load_sats(d_in,d_out)
+        self.gps.load_sats(d_in,d_out)
         #print (self.df_obs)
         #print (self.coord)
-        self.df_obs = gps.getElevation(self.df_obs,self.coord)
-        self.df_obs = gps.getPiercingPoint(self.df_obs,self.coord,self.h)
+        self.df_obs = self.gps.getElevation(self.df_obs,self.coord)
+        self.df_obs = self.gps.getPiercingPoint(self.df_obs,self.coord,self.h)
         
         return True
 
@@ -999,32 +1005,32 @@ class tec:
     def compute_vtec(self):	
  
         #print ("rinex_to_stec")
-        t1=time.time()
+        #t1=time.time()
         if not self.rinex_to_stec(): return
-        t2=time.time()
-        print ("rinex_to_stec",t2-t1)
+        #t2=time.time()
+        #print ("rinex_to_stec",t2-t1)
         #print (self.df_obs[self.df_obs["sv"]=="R01"])
 
-        t1=time.time()
+        #t1=time.time()
         #print ("Calculating satellite position from navigation rinex")
         self.add_satellite_pos()
-        t2=time.time()
-        print ("add_satellite_pos",t2-t1)
+        #t2=time.time()
+        #print ("add_satellite_pos",t2-t1)
         #print (self.df_obs[self.df_obs["sv"]=="R01"])
         
         #print ("Calculating baseline to correct Slant TEC")
-        t1=time.time()
+        #t1=time.time()
         self.add_baseline()
-        t2=time.time()
-        print ("add_baseline",t2-t1)
+        #t2=time.time()
+        #print ("add_baseline",t2-t1)
 
         #print (self.df_obs[self.df_obs["sv"]=="R01"])
         
         #print ("Calculating receiver bias, correct Slant TEC, compute VTEC")
-        t1=time.time()
+        #t1=time.time()
         self.add_receiver_bias()
-        t2=time.time()
-        print ("add_receiver_bias",t2-t1)
+        #t2=time.time()
+        #print ("add_receiver_bias",t2-t1)
 
         
         #print (self.df_obs[self.df_obs["sv"]=="G25"])

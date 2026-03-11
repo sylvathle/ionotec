@@ -14,7 +14,7 @@ classifiers = [
 
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
-dependencies = [ "georinex", "numpy", "pandas", "pymap3d", "datetime", "scipy", "pyarrow", "matplotlib" ]
+dependencies = [ "georinex", "numpy", "pandas", "pymap3d", "datetime", "scipy", "pyarrow", "matplotlib", "cartopy" ]
 
 [project.urls]
 Homepage = "https://github.com/sylvathle/ionotec"

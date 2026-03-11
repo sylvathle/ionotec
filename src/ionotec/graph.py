@@ -3,7 +3,18 @@ import pandas as pd
 import sys
 import numpy as np
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from ionotec import stations
 
+from pathlib import Path
+import cartopy.crs as ccrs
+import cartopy. feature as cfeature
+from cartopy.mpl.geoaxes import GeoAxes
+#import cartopy.io.img_tiles as cimgt
+
+# create output dir
+base_dir = Path(sys.argv[0]).resolve().parent
+target_dir = base_dir / "output/TEC/Figs"
+target_dir.mkdir(parents=True, exist_ok=True)
 
 def plot_station(df_station,png_file_name,mozaic=False):
 
@@ -51,7 +62,9 @@ def plot_station(df_station,png_file_name,mozaic=False):
 
     else:
         fig, axs = plt.subplots(1,figsize=(40,21),sharex=True,sharey=True)
-        
+
+        station_name = png_file_name.split("/")[-1]
+        print (station_name)
         i,j=0,0
         n_sat = 0
         n=0
@@ -75,10 +88,71 @@ def plot_station(df_station,png_file_name,mozaic=False):
                     axs.scatter(df_sat.index,df_sat["VTEC"].values,s=25,c=df_sat["elevation"]*180/np.pi,cmap="PuRd",vmin=0,vmax=90)
             axs.tick_params(axis='both', which='major', labelsize=25)
             axs.tick_params(axis='both', which='minor', labelsize=25)
-            axs.set_title(png_file_name.split("/")[-1]+" "+min_t.strftime("%d/%m/%Y %H:%M:%S") + " - " + max_t.strftime("%d/%m/%Y %H:%M:%S") ,fontsize=30)
+            axs.set_title(station_name+" "+min_t.strftime("%d/%m/%Y %H:%M:%S") + " - " + max_t.strftime("%d/%m/%Y %H:%M:%S") ,fontsize=30)
             axs.grid(True)
             axs.set_ylabel("VTEC(TECu)",fontsize=30)
 
+        ## Add station location on the plot
+        #ax_map = inset_axes(axs, width="20%", height="25%", loc='upper right', borderpad=2)
+        #ax_inset.set_extent([-90, -30, -60, 15]) 
+        #ax_inset.set_xticks([])
+        #ax_inset.set_yticks([])
+ 
+        df_stations = pd.read_csv(stations.csv_stations).set_index("station")
+        pos = df_stations.loc[station_name]
+
+        #request = cimgt.QuadtreeTiles()
+        #sys.exit()
+        ax_map = inset_axes(
+            axs,
+            width="20%",      # very narrow
+            height="35%",    # short bar
+            loc="upper left",
+            bbox_to_anchor=(0.02,-0.05,1.0,1.0),
+            borderpad=0,
+            bbox_transform=axs.transAxes,
+            axes_class=GeoAxes,
+            axes_kwargs=dict(projection=ccrs.PlateCarree())
+            #axes_kwargs=dict(projection=request.crs)
+        
+        )
+
+        ax_map.patch.set_alpha(0.0)
+        ax_map.set_facecolor('none')
+        
+        #ax_map.add_image(request, 8)
+        #ax_map.set_title("Station Location")
+        #ax_map = plt.axes(projection=ccrs.PlateCarree())
+    
+        # 3. Add geographic features
+        #ax_map.add_feature(cfeature.COASTLINE)
+        #ax_map.add_feature(cfeature.BORDERS, linestyle=':')
+        #ax_map.add_feature(cfeature.LAND, facecolor='lightgray', alpha=0.3)
+        ax_map.add_feature(cfeature.OCEAN, facecolor='none',alpha=0.0) # Light blue
+        ax_map.add_feature(cfeature.LAND, facecolor='#F5F5F5', edgecolor='none') # Soft gray-white
+        ax_map.add_feature(cfeature.COASTLINE, linewidth=0.6, edgecolor='#555555')
+        ax_map.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5, edgecolor='#999999')
+        ax_map.set_extent([-90, -30, -60, 15]) 
+
+        ax_map.spines['geo'].set_visible(False)
+        #ax_map.stock_img()
+
+        #ax_map.add_feature(cfeature.OCEAN, facecolor='none',alpha=0.0) # Light blue
+
+        
+
+        ax_map.scatter(pos['lon'], pos['lat'], color='darkred', 
+               s=80, marker='X', transform=ccrs.PlateCarree(), 
+               label='Observation points', zorder=5)
+
+        ax_map.text(pos['lon'], pos['lat'] + 2, station_name,
+                    transform=ccrs.PlateCarree(),
+                    fontsize=24,
+                    fontweight='bold',
+                    ha='center',        # Horizontal alignment: center
+                    va='bottom',        # Vertical alignment: bottom
+                    color='black')
+        
         if not first_GPS:
             cax1 = inset_axes(
                 axs,

@@ -1,9 +1,9 @@
 # ionotec
-Python library for Total Electron Content computing from Rinex files
+Python library for Total Electron Content computing from GNSS Rinex files
 
 ## Requirements
 
-Tested on python 3.9.2
+Tested on Python 3.9.2
 
 ## Installation
 
@@ -41,19 +41,21 @@ To load the ionotec module, do:
 Computing VTEC requires having the following elements:
 
 1. A list Rinex observation file
-This is the file list where the code and phase data will be extracted. The files will be concatenated in the process they should come in continous and chronological order.
-* Format: List of string
+This is the file list where the code and phase data will be extracted. The files will be concatenated in the process. They should come in continuous and chronological order. Also important, they should correspond to only one station; a further version will be able to process several stations at a time.
+* Format: List of strings
 * Example: `f_obs=["/home/me/ionotec/amtc1200.21o","/home/me/ionotec/amtc1210.21o","/home/me/ionotec/amtc1220.21o"]`
 
-2. List of Rinex navigation file
-This is the file list where the position of the satellites will be extracted, usually with a few well chosen files, positions of all satellites can be calculated. Of course, they should correspond to the periods of observation files.
-* Format: List of string
+2. List of Rinex navigation files
+This is the file list from which the positions of the satellites will be extracted, usually using a few well-chosen files, and the positions of all satellites can then be calculated. Of course, they should correspond to the observation periods in the files.
+* Format: List of strings
 * Example: `f_nav=["/home/me/ionotec/amtc1201.21n","/home/me/ionotec/amtc1211.21n","/home/me/ionotec/amtc1221.21n"]`
 
-3. File containing bias of satellites in DCB
+3. File containing satellites DCB, which can be retrieved from <https://cddis.nasa.gov/archive/gnss/products/bias/>
 File containing the bias of satellites corresponding to the month of observation files
-* Format: string pointing to DCB file
-* Example: `f_bias="/home/me/ionotec/P1P22104.DCB"`
+* Format: string pointing to DCB file, only one for the process.
+* Example: `f_bias="/home/me/ionotec/CAS0MGXRAP_20203450000_01D_01D_DCB.bsx"`
+
+We recommend informing one day before and after the period of interest to avoid border effects. 
 
 ### Computing VTEC
 
@@ -65,11 +67,32 @@ And VTEC can be computed with default parameters:
 
 `station_tec.compute_vtec()`
 
-This will create one file in *feather* format in the same path as the second item of `f_obs`, or the first one in case `f_obs` is a one-item list, so in the case of the variables defined upper the files should be found at `/home/me/ionotec/amtc121-tec.feater`.
+This will create one file in *feather* format in the same path as the second item of `f_obs`, or the first one in case `f_obs` is a one-item list, so in the case of the variables defined upper the files should be found at `/home/me/ionotec/amtc121-tec.feather`.
+This will create a folder structure in the same place where the script is run. The tree will look like:
+    
+        output/
+          |__ stations.csv
+          |-- GNSS/
+                |- 2020/
+                    |__ G01.feather
+                    |__      ...
+                    |__ R24.feather
+                |_ record_processing.csv                
+          |-- TEC/
+                |- 2020/
+                    |__ sta1.feather
+                    |__      ...
+                    |__ staN.feather
+                    |__ receiver_bias.csv
+          
+
+* GNSS contains essentially the GNSS position of the satellites (X,Y,Z) for the timeframes informed in the `f_nav` list. The purpose of the file record_processing is to keep track of the days that were processed, for each constellation and inform the best time resolution processed so far. This avoids reprocessing.
+
+* TEC contains the produced TEC information with a naming format XXXX.feather, where XXXX corresponds to the 4 characters labelling the receiver. 
 It will contain the following information:
 
 * **time** (string): *YYYY-MM-DD HH:mm:ss* format
-* **sv** (string): satellite from which is calculated VTEC
+* **sv** (string): satellite from which the VTEC is calculated
 * **lat** (float): latitude of calculated piercing point
 * **lon** (float):  longitude of calculated piercing point
 * **elevation** (float): elevation of satellite in Radians
@@ -78,10 +101,15 @@ It will contain the following information:
 * **VTEC** (float): Vertical TEC in TEC Units, corrected with baseline, satellite bias, receiver bias.
 
 The pandas DataFrame of this data can be directly accessed in the instanciated object through: `station_tec.df_obs`.
+They can be loaded as posteriori using `df_station = pd.read_feather("output/TEC/YYYY/stat.feather")`
+
+The file receiver_bias.csv contains the bias information for each processed station.
+
+* stations.csv contains the information on the position of each processed station (should probably be merged with receiver_bias.csv in the future)
 
 ### Plots
 
-Fast PNGs of data can be directly produced using the `ionotec.graph` submodule:
+Quick PNGs of data can be directly produced using the `ionotec.graph` submodule:
 
 ```
 from ionotec import graph
@@ -89,14 +117,13 @@ from ionotec import graph
 
 All satellites in one graph
 ```
-graph.plot_station(station_tec.df_obs,destination)
+graph.plot_station(station_tec.df_obs)
 ```
 
 or 8 satellites per graph in a mosaic fashion
 ```
-graph.plot_station(station_tec.df_obs,destination,mozaic=True)
+graph.plot_station(station_tec.df_obs,mozaic=True)
 ```
 
-Of course, the `destination` argument should contain the path where you wish to keep the produced graphs; do not add any extension, the method does it alone. 
-
+These graphs will be generated in `output/TEC/Figs/`.
 

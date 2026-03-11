@@ -311,6 +311,12 @@ class gnss:
             df_nav.dropna(inplace=True)
 
             df_nav.index = pd.to_datetime(df_nav.index)
+            if len(df_nav)==0: 
+                #print ("----------------------",f_rinex_nav)
+                continue
+            #print (f_rinex_nav)
+            
+            #print (df_nav)
 
             date = df_nav.index[int(len(df_nav)/2)].date()
             #print ("date",f_rinex_nav,date)
@@ -594,7 +600,7 @@ class gnss:
         df["lat"],df["lon"],df["alt"] = pm.ecef2geodetic(df_inter["pos_ion_X"],df_inter["pos_ion_Y"],df_inter["pos_ion_Z"])
         return df
 
-
+'''
 def getBias_fromfile(sat,f_bias):
     path_local_file = f_bias
     f = open(path_local_file)
@@ -605,7 +611,27 @@ def getBias_fromfile(sat,f_bias):
          else: return float(splt_lin[1])
     print ("No bias found for "+sat)
     return 0.0
+'''
 
+def getBias_fromfile(sat,file):
+    fbias = open(file,'r')
+    if sat[0]=="G":
+        for line in fbias.readlines():
+            splt_line = line.split()
+            if splt_line[0] == "DSB":
+                if splt_line[2]==sat:
+                    if splt_line[3]=="C1W":
+                        if splt_line[4]=="C2W":
+                            return float(splt_line[8])
+    if sat[0]=="R":
+        for line in fbias.readlines():
+            splt_line = line.split()
+            if splt_line[0] == "DSB":
+                if splt_line[2]==sat:
+                    if splt_line[3]=="C1P":
+                        if splt_line[4]=="C2P":
+                            return float(splt_line[8])
+    return float('NaN')
 
 '''
 	return list of dictionnaries, each correspond to information of the arcs in he time series
