@@ -115,7 +115,7 @@ def resume_station(folder):
     df.sort_values(by="station",inplace=True)
     try:
         df.to_csv(csv_stations,index=False)
-        return True
+        return df.set_index("station")
     except:
         return False
 
@@ -174,7 +174,7 @@ def get_closest_stations(p):
 
     dfdist = df.assign(distance = lambda x: np.sqrt((x["X"]-p[0])**2+(x["Y"]-p[1])**2+(x["Z"]-p[2])**2))
     dfdist.sort_values(by="distance",inplace=True)
-    #print (dfdist)
+    #print (dfdist.head())
     return dfdist.index.values.tolist()
 
 def get_station_pos(station):

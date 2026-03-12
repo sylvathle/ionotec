@@ -351,7 +351,7 @@ class gnss:
     def compute_gps_pos(self):
         if (len(self.df_nav_gps)<=2): return
 
-        print ("GPS POS")
+        #print ("GPS POS")
         #self.df_nav_gps.index.set_names(["time","sv"],inplace=True)
         #self.df_nav_gps.reset_index(level=["sv"],inplace=True)
         #self.df_nav_gps.dropna(inplace=True)
@@ -442,7 +442,7 @@ class gnss:
     def compute_glonass_pos(self):
         if (len(self.df_nav_glonass)<=2): return
 
-        print ("GLONASS POS")
+        #print ("GLONASS POS")
         #self.df_nav_glonass.index.set_names(["time","sv"],inplace=True)
         #self.df_nav_glonass.reset_index(level=["sv"],inplace=True)
         #self.df_nav_glonass.dropna(inplace=True)
