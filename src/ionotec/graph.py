@@ -60,7 +60,7 @@ def plot_station(df_station,station_name,mozaic=False):
                 fig, axs = plt.subplots(4,2,figsize=(28,20),sharex=True,sharey=True)
                 N = N+1
         if n!=0:
-            plt.savefig(station_name+"-"+str(N)+".png",bbox_inches='tight')
+            plt.savefig(target_dir+"/"+station_name+"-"+str(N)+".png",bbox_inches='tight')
             plt.close()
             
 

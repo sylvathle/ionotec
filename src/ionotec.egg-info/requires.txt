@@ -6,3 +6,4 @@ datetime
 scipy
 pyarrow
 matplotlib
+cartopy
