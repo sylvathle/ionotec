@@ -10,7 +10,7 @@ test.py
 __pycache__
 .ipynb*
 tests/
-dist
+dist/
 
 package-project/src/pytec/tec_old.py
 package-project/src/pytec/gnss2.py
