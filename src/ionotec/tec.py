@@ -37,7 +37,7 @@ import sys,os,subprocess
 import pymap3d as pm
 #from os import listdir,path,mkdir
 #from os.path import isfile, join
-import julian
+#import julian
 import math	
 import time
 
@@ -50,30 +50,32 @@ pd.options.mode.chained_assignment = None
 # Earth Radius
 R_E = 6371000
 
-## Definition of the constants for the equations of STEC
-f1,f2 = 1575.42 * 1e6, 1227.60 * 1e6
-lambda1,lambda2=csts.c/f1,csts.c/f2
-alpha = f1**2*f2**2/(f1**2-f2**2)/40.318
-
-# List of possible indices in observation RINEX files, P1 not available
-#full_vars_list = ['P1','P2','C1','C2','L1','L2','S1','S2']
-full_vars_list = ['P2','C1','C2','L1','L2','S1','S2']
+# Channels of the glonass constellation per satellite ("k" values)
+ #https://glonass-iac.ru/en/cus/
+channel_glonass = {"R01":1,"R02":-4,"R03":5,"R04":6,"R05":1,"R06":-4,"R07":5,"R08":6,
+           "R09":-2,"R10":-7,"R11":0,"R12":-1,"R13":-2,"R14":-7,"R15":0,"R16":-1,
+           "R17":4,"R18":-3,"R19":3,"R20":2,"R21":4,"R22":-3,"R23":3,"R24":2
+          }
 
 def fit_lin(t,sig):
     N=len(t)
     # Coefficients of paraboloid of error function (N*mse)
     a,b,c,d,e=0,N,0,0,0 # b=N for B^2 coef
-    # Iterate of subseries to calculate coeficients
+    # Iterate over subseries to calculate coefficients
     for i in range(N):
         a+=t[i]**2 # A^2 coef
         c+=2*t[i] # A*B coef
         d-=2*t[i]*sig[i] # A coef
         e-=2*sig[i] # B coef
 
-    # Forward A and B parameters of linear fit (solve minimum of mse)
+    # Forward A and B parameters of linear fit (solve the minimum of mse)
     A=-(2*b*d-c*e)/(4*a*b-c**2)
     B=-(c*d-2*a*e)/(c**2-4*a*b)
 
+    #if ((4*a*b-c**2==0) or (c**2-4*a*b==0)): 
+    #if True:
+    #    print (a,b,c,A,B,sig)
+    
     sigma=0
     sigmas = []
     # Calculate value of err function
@@ -124,7 +126,6 @@ def filter_slope_leap(list_borders,series,diffs):
 
 
 def plot_leap(diffs,series,s,A,B,N,borders,title=""):
-    print ("plot_leap")
     fig, ax = plt.subplots(1,figsize=(10,7))
     xx = np.array(diffs[s:s+N])
     yy = A*xx+B
@@ -166,22 +167,63 @@ def plot_leap(diffs,series,s,A,B,N,borders,title=""):
     plt.show()
     plt.close()
 
+
+
+from pathlib import Path
+
+
+
 class tec:
 
-    def __init__(self,list_f_obs,f_nav,f_sat_bias,f_out="",resolution=60,h=400000):
+    ## Definition of the constants for the equations of STEC
+    gps_f1, gps_f2 = 1575.42 * 1e6, 1227.60 * 1e6
+    gps_lambda1, gps_lambda2 = csts.c/gps_f1, csts.c/gps_f2
+    gps_alpha = gps_f1**2*gps_f2**2/(gps_f1**2-gps_f2**2)/40.318
 
+    #https://glonass-iac.ru/en/cus/
+    glonass_f1,glonass_f2 = 1602 * 1e6, 1246 * 1e6
+    #glonass_lambda1,glonass_lambda2=csts.c/glonass_f1,csts.c/glonass_f2
+    #glonass_alpha = glonass_f1**2*glonass_f2**2/(glonass_f1**2-glonass_f2**2)/40.318
+    
+    # List of possible indices in observation RINEX files, P1 not available
+    #full_vars_list = ['P1','P2','C1','C2','L1','L2','S1','S2']
+    full_vars_list = ['P2','P1','C2','C1','L1','L2']
+
+    sv_gps = []
+    sv_glonass = []
+    sv_galileo = []
+
+    is_gnss_processed = False
+    
+    def __init__(self,list_f_obs,f_nav,f_sat_bias,outfolder="output",resolution=60,h=400000):
+    
         # List of observation files
-        self.list_f_obs = list_f_obs        
+        self.list_f_obs = list_f_obs 
         # List of navigation files
         self.f_nav = f_nav
         # File containing satellite bias
         self.f_sat_bias = f_sat_bias
         #Output feather file
-        if f_out == "": 
-            self.f_feather = self.list_f_obs[min(len(self.list_f_obs)-1,1)][:-4]+"tec.feather"
-        else:
-            if f_out[-8:] ==".feather": self.f_feather = f_out
-            else: self.f_feather = f_out + ".feather"
+        #if f_out == "": 
+        #    self.f_feather = self.list_f_obs[min(len(self.list_f_obs)-1,1)][:-4]+"tec.feather"
+        #else:
+        #    if f_out[-8:] ==".feather": self.f_feather = f_out
+        #    else: self.f_feather = f_out + ".feather"
+    
+        self.sv_gps = [str(i+1) for i in range(32)]
+        for i,sv in enumerate(self.sv_gps):
+            if i<9: self.sv_gps[i] = "G0"+self.sv_gps[i]
+            else: self.sv_gps[i] = "G"+self.sv_gps[i]
+
+        self.sv_glonass = [str(i+1) for i in range(24)]
+        for i,sv in enumerate(self.sv_glonass):
+            if i<9: self.sv_glonass[i] = "R0"+self.sv_glonass[i]
+            else: self.sv_glonass[i] = "R"+self.sv_glonass[i]
+
+        self.sv_galileo = [str(i+1) for i in range(36)]
+        for i,sv in enumerate(self.sv_galileo):
+            if i<9: self.sv_galileo[i] = "E0"+self.sv_galileo[i]
+            else: self.sv_galileo[i] = "E"+self.sv_galileo[i]
         
         if not os.path.isfile(self.f_sat_bias): 
             print ("bias file location not found, will take 0, might affect strongly the results")
@@ -225,18 +267,117 @@ class tec:
             try: os.mkdir(st.root_dir + "TEC/")
             except OSError as e:
                     if e.errno!=17: print ("FAIL creation of directory "+st.root_dir + "TEC/", e )
-            else: print ("Successfully created the directory "+st.root_dir + "TEC/")
+            #else: print ("Successfully created the directory "+st.root_dir + "TEC/")
+        self.gps = gnss.gnss(self.f_nav)
 
+    def getAlpha(self,sv):
+        if sv[0]=="G": return self.gps_alpha
+        if sv[0]=="R": 
+            f1 = self.glonass_f1 + 1e6*channel_glonass[sv]*9/16
+            f2 = self.glonass_f2 + 1e6*channel_glonass[sv]*7/16
+            lambda1 = csts.c/f1
+            lambda2 = csts.c/f2
+            return f1**2*f2**2/(f1**2-f2**2)/40.318
+
+    def load_GPS_obs(self,f_obs):
+        #self.list_stations = []
+        try: 
+            #obs=gr.load(f_obs,meas=list_vars)
+            header = gr.rinexheader(f_obs)
+            station = header['MARKER NAME'].replace(" ","")
+            #if station in self.list_stations: self.list_stations.append(station)
+            
+            self.list_vars = []
+            
+            # lista de campos accesibles en el header
+            fields = header['fields']
+            # Revisamos si las variables están disponibles
+            for l in self.full_vars_list:
+                if l in fields: self.list_vars.append(l)
+            obs=gr.load(f_obs,meas=self.list_vars,use="G")
+        except: return
+        
+        # Rinex to DataFrame
+        df_gps_temp = obs.to_dataframe()
+        df_gps_temp.index.set_names(["time","sv"],inplace=True)
+        df_gps_temp.reset_index(level=["sv"],inplace=True)
+        df_gps_temp.index = pd.to_datetime(df_gps_temp.index)
+    
+        #self.df_gps_temp["alpha"] = self.gps_alpha
+        #self.df_gps_temp["lambda1"] = self.gps_lambda1
+        #self.df_gps_temp["lambda2"] = self.gps_lambda2
+        df_gps_temp['STEC_slp'] = (df_gps_temp['P2'] - df_gps_temp['C1'])*self.gps_alpha/1e16
+        df_gps_temp['STEC_sll'] = (self.gps_lambda1*df_gps_temp['L1'] - self.gps_lambda2*df_gps_temp['L2'])*self.gps_alpha/1e16
+        df_gps_temp = df_gps_temp[['sv','STEC_slp','STEC_sll']]
+        df_gps_temp.dropna(inplace=True)
+        self.df_obs_gps = pd.concat([self.df_obs_gps,df_gps_temp])
+    
+    def load_GLONASS_obs(self,f_obs):
+        try: 
+            header = gr.rinexheader(f_obs)
+            station = header['MARKER NAME'].replace(" ","")
+            #if station in self.list_stations: self.list_stations.append(station)
+            
+            self.list_vars = []
+            
+            # lista de campos accesibles en el header
+            fields = header['fields']
+            # Revisamos si las variables están disponibles
+            for l in self.full_vars_list:
+                if l in fields: self.list_vars.append(l)
+            obs=gr.load(f_obs,meas=self.list_vars,use="R")
+        except: return
+
+        # Rinex to DataFrame
+        df_glonass_temp = obs.to_dataframe()
+        df_glonass_temp.index.set_names(["time","sv"],inplace=True)
+        df_glonass_temp.reset_index(level=["sv"],inplace=True)
+        df_glonass_temp.index = pd.to_datetime(df_glonass_temp.index)
+
+        if len(df_glonass_temp)==0: return
+        
+        list_sv = df_glonass_temp['sv'].unique().tolist()
+        if len(list_sv)==0: return
+        
+        for sv in list_sv:
+            df_sat_glo  = df_glonass_temp[df_glonass_temp["sv"]==sv]
+            df_sat_glo["f1"] = self.glonass_f1 + 1e6*channel_glonass[sv]*9/16
+            df_sat_glo["f2"] = self.glonass_f2 + 1e6*channel_glonass[sv]*7/16
+            df_glonass_temp = pd.concat([df_glonass_temp,df_sat_glo])
+
+        var1, var2 = "",""
+        if "P2" in df_glonass_temp.columns: var1 = "P2"
+        elif "C2" in df_glonass_temp.columns: var1 = "C2"
+        if "P1" in df_glonass_temp.columns: var2 = "P1"
+        elif "C1" in df_glonass_temp.columns: var2 = "C1"
+
+        if ((var1=="") or (var2=="")): return
+
+        df_glonass_temp["lambda1"] = csts.c/df_glonass_temp["f1"]
+        df_glonass_temp["lambda2"] = csts.c/df_glonass_temp["f2"]
+        df_glonass_temp["alpha"] = df_glonass_temp["f1"]**2*df_glonass_temp["f2"]**2/(df_glonass_temp["f1"]**2-df_glonass_temp["f2"]**2)/40.318
+    
+        df_glonass_temp['STEC_slp'] = (df_glonass_temp[var1] - df_glonass_temp[var2])*df_glonass_temp["alpha"]/1e16
+        df_glonass_temp['STEC_sll'] = (df_glonass_temp["lambda1"]*df_glonass_temp['L1'] - \
+                                       df_glonass_temp["lambda2"]*df_glonass_temp['L2'])*df_glonass_temp["alpha"]/1e16
+
+        df_glonass_temp = df_glonass_temp[['sv','STEC_slp','STEC_sll']]
+        df_glonass_temp.dropna(inplace=True)
+
+        self.df_obs_glonass = pd.concat([self.df_obs_glonass,df_glonass_temp])
+
+        
     def rinex_to_stec(self):
         ''' Extract the relevant data for tec calculation from observation and navigation
             Compute STEC of pseudo range and code phase
         '''
-
+        #print ("rinex to stec")
+        
         # Header for observation
         try: 
-            # Header of the central file, the one we want to save the information
+        #    # Header of the central file, the one we want to save the information
             header = gr.rinexheader(self.list_f_obs[min(len(self.list_f_obs)-1,1)])
-            # Header of the first file, to extract 
+        #    # Header of the first file, to extract 
         except ValueError: return False
         self.station =header["MARKER NAME"].replace(" ","").lower()
         self.coord = header['position']
@@ -250,83 +391,55 @@ class tec:
         for t in t_obs_splt:
             if t not in ["","GPS"]:
                 t_obs_list.append(float(t))
-
+#
         date_observation = datetime.datetime(int(t_obs_list[0]),int(t_obs_list[1]),int(t_obs_list[2]),int(t_obs_list[3]),int(t_obs_list[4]),int(t_obs_list[5]))
         self.year = date_observation.year
         self.doy = str(date_observation.timetuple().tm_yday)
         #sys.exit()
 
-        list_vars = []
+        #self.list_vars = []
 
         # lista de campos accesibles en el header
-        fields = header['fields']
+        #fields = header['fields']
 
         # Revisamos si las variables están disponibles
-        for l in full_vars_list:
-            if l in fields: list_vars.append(l)
-
+        #for l in self.full_vars_list:
+        #    if l in fields: self.list_vars.append(l)
+        
         # Concat all data in one file
-        first=True
-        self.df_obs = pd.DataFrame()
+        self.df_obs_gps = pd.DataFrame()
+        self.df_obs_glonass = pd.DataFrame()
         for f_obs in self.list_f_obs:
-            # Read data of observation file
-            obs=gr.load(f_obs,meas=list_vars,use="G")
- 
-            if first: 
-                # Rinex a DataFrame
-                self.df_obs = obs.to_dataframe()
-                self.df_obs.index.set_names(["time","sv"],inplace=True)
-                self.df_obs.reset_index(level=["sv"],inplace=True)
-                self.df_obs.index = pd.to_datetime(self.df_obs.index)
-                first=False
-            else:
-                # Rinex a DataFrame
-                df_day = obs.to_dataframe()
-                df_day.index.set_names(["time","sv"],inplace=True)
-                df_day.reset_index(level=["sv"],inplace=True)
-                df_day.index = pd.to_datetime(df_day.index)
-                self.df_obs = pd.concat([df_day,self.df_obs])
-            
-            
+            self.load_GPS_obs(f_obs)
+            self.load_GLONASS_obs(f_obs)
 
+        #for station in self.df_obs_gps.keys():
+        self.df_obs = pd.concat([self.df_obs_gps,self.df_obs_glonass])
+
+        #sys.exit()
         # List satellites seen by the station and prepare dict of list_borders
         for s in self.df_obs["sv"].values:
             if s not in self.sv:
                 self.sv.append(s)
                 self.borders[s]=[]
 
-        # Process Slant TEC for pseudo range (slp)
-        self.df_obs['STEC_slp'] = (self.df_obs['P2'] - self.df_obs['C1'])*alpha/1e16
-        # Process Slant TEC for code phase (sll)
-        self.df_obs['STEC_sll'] = (lambda1*self.df_obs['L1'] - lambda2*self.df_obs['L2'])*alpha/1e16
-
         # Changing resolution
-        self.df_obs = self.df_obs.groupby("sv").resample(str(self.resolution)+"S").mean()
+        self.df_obs = self.df_obs.groupby("sv").resample(str(self.resolution)+"s").mean()
         self.df_obs.reset_index(level=["sv"],inplace=True)
 
-        # Remove nan values (may be optimized)
-        self.df_obs.dropna(subset=["STEC_slp","STEC_sll"],inplace=True)
-
-        ## When intermediate feather not used anymore .reset_index() should be removed
-        self.df_obs = self.df_obs[["sv","STEC_slp","STEC_sll"]]#.reset_index()
         return True
 
 
     def add_satellite_pos(self):
         #time_list =  self.df_obs.index
-        gps = gnss.gnss(self.f_nav)
+        
         
         d_in, d_out = min(self.df_obs.index), max(self.df_obs.index)
-        gps.load_sats(d_in,d_out)
-        df_data = pd.DataFrame()
-
-        t_tot = 0
-        t_full = 0
-        tf = time.time()
-        
-        
-        self.df_obs = gps.getElevation(self.df_obs,self.coord)
-        self.df_obs = gps.getPiercingPoint(self.df_obs,self.coord,self.h)
+        self.gps.load_sats(d_in,d_out)
+        #print (self.df_obs)
+        #print (self.coord)
+        self.df_obs = self.gps.getElevation(self.df_obs,self.coord)
+        self.df_obs = self.gps.getPiercingPoint(self.df_obs,self.coord,self.h)
         
         return True
 
@@ -363,7 +476,9 @@ class tec:
 
         unstable_left=True
 
-        while s<len(series)-N:
+        list_series = series.tolist()
+        
+        while s<len(list_series)-N:
 
             #Going for N next point without big jump
             if False:
@@ -382,10 +497,14 @@ class tec:
                         has_big_time_jump=False
 
             #Get linear fit parameter of N right points
+            #print (series[s:s+N])
             A,B,max_dev,mean_dev = fit_lin(diffs[s:s+N],series[s:s+N].values)
             # Compute distance of point s and s+N+1 with fit
-            left_dev=abs(series[s-1]-A*diffs[s-1]-B) if s>0 else None
-            right_dev=abs(series[s+N]-A*diffs[s+N]-B) if s+N<len(series) else None
+            left_dev=abs(list_series[s-1]-A*diffs[s-1]-B) if s>0 else None
+            #print (len(list_series),len(diffs),s,N)
+            #print (list_series)
+            #print (diffs)
+            right_dev=abs(list_series[s+N]-A*diffs[s+N]-B) if s+N<len(series) else None
             list_fit_params[s]={"A":A,"B":B,"max_dev":max_dev,"left_dev":left_dev,"right_dev":right_dev}
             s+=1
 
@@ -548,7 +667,7 @@ class tec:
         t_end = df_data.index[-1]
 
         df_filtered = pd.DataFrame()
-
+        
         for sat in self.sv:
 
             df_sat = df_data[df_data["sv"]==sat]
@@ -559,15 +678,17 @@ class tec:
             list_arcs = gnss.get_arcs(elevations,t_begin,t_end)
 
             # Get satellite bias and correct STEC_sl with it
-            sat_bias = gnss.getBias_fromfile(sat,self.f_sat_bias) * alpha * csts.c * 1e-9  / 1e16
+            sat_bias = gnss.getBias_fromfile(sat,self.f_sat_bias) * self.getAlpha(sat) * csts.c * 1e-9  / 1e16
             df_sat['STEC_sl']=df_sat['STEC_sll']
 
+            
             # Squared of sin of elevation for baseline (Brs) pondering
             df_sat["sin2_ele"] = np.sin(df_sat['elevation'])**2
 
             # Individual values of the sum for future baseline calculation
             df_sat['BRs'] = (df_sat['STEC_slp']-df_sat['STEC_sll'])*df_sat["sin2_ele"]
 
+            
             # cos(chi) to calculate VTEC from STEC
             df_sat['cos_chi'] = np.cos(np.arcsin(R_E*np.cos(df_sat["elevation"])/(R_E+self.h)))
 
@@ -581,11 +702,12 @@ class tec:
                 # Extract data from satellite arc
                 df_arc = df_sat.loc[arc["start"]:arc["end"]]
                 if len(df_arc)<=8:continue
-
+                
                 arc_borders = self.list_leaps(df_arc)
 
                 if len(arc_borders)==0: continue
 
+                
                 # Eliminate segments with too low elevation satellites
                 list_max_ele = []
                 #for i,b in enumerate(arc_borders):
@@ -621,6 +743,7 @@ class tec:
                         d_df_seg.append(None)
                 if not has_sane_parts: continue
 
+
                 # paste left part of arc
                 for i in range(sane_indices[0]-1,-1,-1):
                     df_seg = None
@@ -653,7 +776,6 @@ class tec:
                     else: correction = glue
                     df_seg["STEC_sl"] = df_seg["STEC_sl"] + correction
                     d_df_seg[i] = df_seg
-
 
                 # Look at intermediate segments
                 i = 0
@@ -709,13 +831,13 @@ class tec:
                                 elif not only_left:
                                     only_right=True
 
-
                 df_filter_arc = pd.DataFrame()
                 for df in d_df_seg:
                     if df is None:continue
                     df_filter_arc = pd.concat([df_filter_arc,df])
 
                 # Calculate VTEC (still not take into account receiver bias)
+                #print (sat,sat_bias)
                 df_filter_arc["STEC_sl"] = df_filter_arc["STEC_sl"]+sat_bias
                 df_filter_arc['VTEC']=df_filter_arc['STEC_sl']*df_filter_arc['cos_chi']
                 df_filter_arc=df_filter_arc[["sv","lat","lon","elevation","cos_chi","STEC_sll","STEC_slp","STEC_sl","VTEC"]]
@@ -739,65 +861,96 @@ class tec:
                 *algebra: https://colab.research.google.com/drive/1UCZHR0t-9jyyjAnLuMN3N0Z2NB6tgI_l?usp=sharing
         '''
 
-        df = self.df_obs.copy()
+        #df = self.df_obs.copy() #[self.df_obs["sv"].isin(self.sv_gps)]
+        
+        df_gps = self.df_obs[self.df_obs["sv"].isin(self.sv_gps)]
+        df_glonass = self.df_obs[self.df_obs["sv"].isin(self.sv_glonass)]
+        
+        #print ("Computed receiver bias")
+        #print (df)
+        #df_gps = df[df["sv"].isin(self.sv_gps)]
+        #print (df_gps)
 
         # Remove rows with nan STEC_sl
-        df.dropna(subset=["STEC_sl","elevation"],inplace=True)
-        df = df[df["elevation"]>30*np.pi/180]
+        
+        #df = df_gps[df_gps["elevation"]>30*np.pi/180]
 
         # Compute cos\chi for full serie
-        df["ci"] = np.cos(np.arcsin(R_E*np.cos(df["elevation"])/(R_E+self.h)))
+        #df["ci"] = np.cos(np.arcsin(R_E*np.cos(df["elevation"])/(R_E+self.h)))
 
-        # Coefficients of the cuadratic error function that will be computed
-        a,b=0,0
+        self.br_gps = float('NaN')
+        self.br_glonass = float('NaN')
+        
+        for constel in ['G','R']:
 
-        # Create list of time of the station removing duplicates
-        time_series = df.groupby(level="time").size()
-        time_series = time_series.index
+            # Coefficients of the quadratic error function that will be computed
+            a,b=0,0
+            
+            if constel=="G": df = df_gps[df_gps["elevation"]>30*np.pi/180]
+            if constel=="R": df = df_glonass[df_glonass["elevation"]>30*np.pi/180]
 
-        #print (len(time_series))
-        # Compute sums
-        for t in time_series:
-            sum_ci = 0 # sum of cos\chi_i for a coefficient (to be squared)
-            sum_ci2 = 0 # sum of squared of cos\chi_i for a and b coefficient
-            sum_sici = 0 # sum of STEC_i*cos\chi_i for b coefficient
-            sum_sici2 = 0 # sum of STEC_i*cos\chi_i^2 for b coefficient
-            N=0 # Number of satellites with data at time t
-            # Get subserie containing data at time t
-            df_t = df.loc[t]
-            # If only one satellite has data, df_t is a Series, not a Dataframe, nothing to compute
-            if isinstance(df_t,pd.Series): continue
-            # Compute sums over each satellite
-            for index,row in df_t.iterrows():
-                si = row["STEC_sl"]
-                ci = row["ci"]
-                sum_ci += ci
-                sum_ci2 += ci**2
-                sum_sici += si*ci
-                sum_sici2 += si*ci*ci
-                N+=1
-            if N==0: continue
-            # Update a and b over time serie, we ignore the main 1/N factor since it cancels for bias
-            # We also ignore "2" factor for a since is cancels in -b/(2a) root calculation
-            a=a+(sum_ci2-(1/N)*sum_ci**2)/N
-            b=b+(sum_sici2-(1/N)*sum_sici*sum_ci)/N
-            #print (a,b,si,ci,sum_ci,sum_ci2,sum_sici,sum_sici2,N)
-            if math.isnan(a) or math.isnan(b): sys.exit()
+            # Compute cos\chi for full serie
+            df["ci"] = np.cos(np.arcsin(R_E*np.cos(df["elevation"])/(R_E+self.h)))
+            df.dropna(subset=["STEC_sl","elevation"],inplace=True)
+            #df = df[df["sv"].isin(list_sv)]
+            
+            if len(df)>0:
+            
+                # Create list of time of the station removing duplicates
+                time_series = df.groupby(level="time").size()
+                time_series = time_series.index
+        
+                #print (len(time_series))
+                # Compute sums
+                for t in time_series:
+                    sum_ci = 0 # sum of cos\chi_i for a coefficient (to be squared)
+                    sum_ci2 = 0 # sum of squared of cos\chi_i for a and b coefficient
+                    sum_sici = 0 # sum of STEC_i*cos\chi_i for b coefficient
+                    sum_sici2 = 0 # sum of STEC_i*cos\chi_i^2 for b coefficient
+                    N=0 # Number of satellites with data at time t
+                    # Get subserie containing data at time t
+                    df_t = df.loc[t]
+                    # If only one satellite has data, df_t is a Series, not a Dataframe, nothing to compute
+                    if isinstance(df_t,pd.Series): continue
+                    # Compute sums over each satellite
+                    for index,row in df_t.iterrows():
+                        si = row["STEC_sl"]
+                        ci = row["ci"]
+                        sum_ci += ci
+                        sum_ci2 += ci**2
+                        sum_sici += si*ci
+                        sum_sici2 += si*ci*ci
+                        N+=1
+                    if N==0: continue
+                    # Update a and b over time serie, we ignore the main 1/N factor since it cancels for bias
+                    # We also ignore "2" factor for a since is cancels in -b/(2a) root calculation
+                    a=a+(sum_ci2-(1/N)*sum_ci**2)/N
+                    b=b+(sum_sici2-(1/N)*sum_sici*sum_ci)/N
+                    #print (a,b,si,ci,sum_ci,sum_ci2,sum_sici,sum_sici2,N)
+                    if math.isnan(a) or math.isnan(b): sys.exit()
+        
+                if a==0: return float("nan")
+                # root of error function = receiver bias.
+                br = b/a
+        
+                if constel=="G": 
+                    self.br_gps = br
+                    df_gps["br"] = br
+                if constel=="R": 
+                    self.br_glonass = br
+                    df_glonass["br"] = br
 
-        if a==0: return float("nan")
-        # root of error function = receiver bias.
-        br = b/a
-
-        self.br = br
-
-        d = {"station":[self.station],"br":[self.br]}
+        self.df_obs = pd.concat([df_gps,df_glonass])
+        #print (self.df_obs)
+        
+        d = {"station":[self.station],"br_gps":[self.br_gps],"br_glonass":[self.br_glonass]}
 
         f_br = st.root_dir + "TEC/" + str(self.year) + "/receiver_bias.csv"
         if not os.path.exists(st.root_dir + "TEC/"+ str(self.year)):
             try: os.mkdir(st.root_dir + "TEC/"+ str(self.year))
             except OSError as e:
                     if e.errno!=17: print ("FAIL creation of directory "+st.root_dir + "TEC/"+ str(self.year), e )
-            else: print ("Successfully created the directory "+st.root_dir + "TEC/"+ str(self.year))
+            #else: print ("Successfully created the directory "+st.root_dir + "TEC/"+ str(self.year))
                     
         if os.path.exists(f_br):
             df_br = pd.read_csv(f_br).set_index("station")
@@ -807,9 +960,10 @@ class tec:
         else:
             df_br = pd.DataFrame(d).set_index("station")
             df_br.to_csv(f_br)
+        #print (df_br)
 
 
-    def get_receiver_bias(self,force_compute=False):
+    def get_receiver_bias(self,sat,force_compute=False):
         ''' Function that returns the bias of the station given in argument
                 If the information is not in stations.csv just return 0
                     (with warning, receiver bias should not be ignored)
@@ -842,7 +996,7 @@ class tec:
         self.df_obs.dropna(subset=["STEC_sl"],inplace=True)
 
         # Compute VTEC with receiver bias
-        self.df_obs["VTEC"]=(self.df_obs["STEC_sl"]-self.br)*np.cos(np.arcsin(R_E*np.cos(self.df_obs["elevation"])/(R_E+self.h)))
+        self.df_obs["VTEC"]=(self.df_obs["STEC_sl"]-self.df_obs["br"])*np.cos(np.arcsin(R_E*np.cos(self.df_obs["elevation"])/(R_E+self.h)))
 
     def to_feather(self, f_feather):
         self.df_obs[["sv","lat","lon","elevation","STEC_slp","STEC_sl","VTEC"]].reset_index().to_feather(f_feather)
@@ -850,22 +1004,39 @@ class tec:
 
     def compute_vtec(self):	
  
-        print ("Converting code and pseudorange from observation rinex to slant tec")
+        #print ("rinex_to_stec")
+        #t1=time.time()
         if not self.rinex_to_stec(): return
-    	
-        print ("Calculating satellite position from navigation rinex")
+        #t2=time.time()
+        #print ("rinex_to_stec",t2-t1)
+        #print (self.df_obs[self.df_obs["sv"]=="R01"])
+
+        #t1=time.time()
+        #print ("Calculating satellite position from navigation rinex")
         self.add_satellite_pos()
-    
-        print ("Calculating baseline to correct Slant TEC")
+        #t2=time.time()
+        #print ("add_satellite_pos",t2-t1)
+        #print (self.df_obs[self.df_obs["sv"]=="R01"])
+        
+        #print ("Calculating baseline to correct Slant TEC")
+        #t1=time.time()
         self.add_baseline()
-    
-        print ("Calculating receiver bias, correct Slant TEC, compute VTEC")
+        #t2=time.time()
+        #print ("add_baseline",t2-t1)
+
+        #print (self.df_obs[self.df_obs["sv"]=="R01"])
+        
+        #print ("Calculating receiver bias, correct Slant TEC, compute VTEC")
+        #t1=time.time()
         self.add_receiver_bias()
-        
-        
-        
+        #t2=time.time()
+        #print ("add_receiver_bias",t2-t1)
 
-
-        print ("Save to feather:",self.f_feather)
-        self.to_feather(self.f_feather)
+        
+        #print (self.df_obs[self.df_obs["sv"]=="G25"])
+        #print (self.df_obs[self.df_obs["sv"]=="R01"])
+        
+        #print ("Save to feather:",st.root_dir + "TEC/" + str(self.year) + "/" + self.station + str(self.doy) + "tec.feather")
+        self.to_feather(st.root_dir + "TEC/" + str(self.year) + "/" + self.station + ".feather" )
+        #self.to_feather(self.f_feather)
     

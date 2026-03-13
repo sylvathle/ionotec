@@ -28,30 +28,111 @@ import georinex as gr
 import pandas as pd
 import numpy as np
 
-from os import listdir, getenv, path
+import pymap3d as pm
+
+from os import listdir, getenv, path, makedirs
 from os.path import isfile, join
 
 import sys
 
-from decouple import config
+#import os
+#root_dir = os.environ.get('PYTEC_PATH')
 
-root_dir = config('PYTEC_PATH')+"/"
+from pathlib import Path
+# create output dir
+base_dir = Path(sys.argv[0]).resolve().parent
+target_dir = base_dir / "output/"
+target_dir.mkdir(parents=True, exist_ok=True)
+print ("Output directory:",target_dir)
+root_dir = str(target_dir)+"/"
+#print ("root_dir", root_dir)
+
+#def create_output(folder_name: str) -> Path:
+#    """
+#    Create a folder in the same directory as the script that started execution
+###    (e.g. main.py).
+#    """
+#    main_file = Path(sys.argv[0]).resolve()
+#    base_dir = main_file.parent
+
+#    target_dir = base_dir / folder_name
+#    target_dir.mkdir(parents=True, exist_ok=True)
+
+#   return target_dir
+
+#def create_output(base_dir: Path, folder_name: str) -> Path:
+#    base_dir = Path(base_dir).resolve()
+#    target = base_dir / folder_name
+#    target.mkdir(parents=True, exist_ok=True)
+#    return target
 
 csv_stations = root_dir+"stations.csv"
 
-def resume_station(year,force=False):
+def resume_station(folder):
     '''  Function not coordinated by now with only code
     Creates stations.csv that contains information about the navigation
     stations
     '''
+
+    search_dir = Path(folder)
+    #files = list({f.name for f in search_dir.rglob("*o") if f.is_file()})
+
+    files_dict = {f.name: str(f.resolve()) for f in search_dir.rglob("*o") if f.is_file()}
+
+    # Extract just the full paths into your list
+    files = list(files_dict.values())
+
+    #sys.exit()
     
+    #doyfolder = folder+str(year)+"\\"+str(doy)+"\\"
+    #print ("LIST stations")
+    #files = [f for f in listdir(doyfolder) if isfile(join(doyfolder, f))]
+    #print (files)
+    d = {"station":[],"X":[],"Y":[],"Z":[],"resolution(s)":[]}
+    for f in files:
+        fname = f.split("\\")[-1] 
+        if f[-1]!="o": continue
+        station = fname[:4]
+        #print (fname,station)
+        if station in d["station"]: continue
+
+        try: header = gr.rinexheader(f)
+        except ValueError:
+            print ("Error in file",f)
+        if "INTERVAL" in header.keys(): interval = float(header["INTERVAL"].replace(" ",""))
+        else: interval = 1.0
+        pos_antena = header['position']
+        d["station"].append(station)
+        d["X"].append(pos_antena[0])
+        d["Y"].append(pos_antena[1])
+        d["Z"].append(pos_antena[2])
+        d["resolution(s)"].append(interval)
+        #d["br"].append(float("nan"))
+    
+
+    df = pd.DataFrame(d)
+    df["lat"],df["lon"],df["alt"] = pm.ecef2geodetic(df["X"],df["Y"],df["Z"])
+    df.sort_values(by="station",inplace=True)
+    try:
+        df.to_csv(csv_stations,index=False)
+        return df.set_index("station")
+    except:
+        return False
+
+#def resume_station(year_folder,force=False):
+#    '''  Function not coordinated by now with only code
+#    Creates stations.csv that contains information about the navigation
+#    stations
+#    '''
+
+'''   
     print ("LIST stations")
     
     if path.exists(csv_stations) and not force: return
-    year_folder = root_dir + str(year)+ "/"
+    #year_folder = root_dir + "TEC/" + str(year)+ "/"
     for f in listdir(year_folder):
         doy = f.replace(".zip","")
-        day_folder = year_folder+ doy + "/"
+        day_folder = year_folder + doy + "/"
         print (day_folder)
 
         files = [f for f in listdir(day_folder) if isfile(join(day_folder, f))]
@@ -81,17 +162,20 @@ def resume_station(year,force=False):
     df = pd.DataFrame(d)
     df.sort_values(by="station",inplace=True)
     df.to_csv(csv_stations,index=False)
+'''
+
+
 
 def get_closest_stations(p):
     ''' Input: list of three float corresponding to the (X,Y,Z) coordinates
         Output: a list of strings corresponding to the station ordered by the closest to farthest '''
     df = pd.read_csv(csv_stations)
     df.set_index("station",inplace=True)
-    #p = df[["X","Y","Z"]].iloc[1]
-    #print (p)
-    dfdist = df.assign(distance = lambda x: ((x["X"]-p[0])**2+(x["Y"]-p[1])**2+(x["Z"]-p[2])**2))
+
+    dfdist = df.assign(distance = lambda x: np.sqrt((x["X"]-p[0])**2+(x["Y"]-p[1])**2+(x["Z"]-p[2])**2))
     dfdist.sort_values(by="distance",inplace=True)
-    return dfdist.index.values
+    #print (dfdist.head())
+    return dfdist.index.values.tolist()
 
 def get_station_pos(station):
     '''	Input: string, name of a station
@@ -106,20 +190,3 @@ def get_station_interval(station):
     df = pd.read_csv(csv_stations).set_index("station")
     pos = float(df[["interval"]].loc[station].values)
     return pos
-
-#class BaseClass:
-#    def base_method(self) -> str:
-#        """
-#        Base method.
-#        """
-#        return "hello from BaseClass"
-
-#    def __call__(self) -> str:
-#        return self.base_method()
-
-
-#def base_function() -> str:
-#    """
-#    Base function.
-#    """
-#    return "hello from base function"

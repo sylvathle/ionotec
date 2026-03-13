@@ -8,6 +8,9 @@ test.py
 .pytec
 .env
 __pycache__
+.ipynb*
+tests/
+dist
 
 package-project/src/pytec/tec_old.py
 package-project/src/pytec/gnss2.py

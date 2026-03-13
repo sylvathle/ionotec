@@ -1,7 +1,0 @@
-georinex
-julian
-pymap3d
-
-[dev]
-
-[test]

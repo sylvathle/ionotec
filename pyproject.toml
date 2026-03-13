@@ -1,0 +1,21 @@
+[project]
+name = "ionotec"
+version = "0.0.12"
+authors = [
+  { name="Sylvain Blunier", email="sylvain.blunier@gmail.com" },
+]
+description = "Code calculating TEC from RINEX information"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+dependencies = [ "georinex", "numpy", "pandas", "pymap3d", "datetime", "scipy", "pyarrow", "matplotlib", "cartopy" ]
+
+[project.urls]
+Homepage = "https://github.com/sylvathle/ionotec"
+Issues = "https://github.com/sylvathle/ionotec/issues"
