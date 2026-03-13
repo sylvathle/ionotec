@@ -3,7 +3,7 @@ import pandas as pd
 import sys
 import numpy as np
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-import plotly.express as px
+#import plotly.express as px
 from ionotec import stations
 
 from pathlib import Path
