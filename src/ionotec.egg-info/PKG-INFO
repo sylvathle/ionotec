@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: ionotec
-Version: 0.0.13
+Version: 0.0.14
 Summary: Code calculating TEC from RINEX information
 Author-email: Sylvain Blunier <sylvain.blunier@gmail.com>
 License-Expression: MIT
