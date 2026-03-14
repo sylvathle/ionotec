@@ -1,6 +1,6 @@
 [project]
 name = "ionotec"
-version = "0.0.12"
+version = "0.0.13"
 authors = [
   { name="Sylvain Blunier", email="sylvain.blunier@gmail.com" },
 ]
