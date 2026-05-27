@@ -107,7 +107,7 @@ def plot_station(df_station,station_name,mozaic=False):
 
         #request = cimgt.QuadtreeTiles()
         #sys.exit()
-        ax_map = inset_axes(
+        '''ax_map = inset_axes(
             axs,
             width="20%",      # very narrow
             height="35%",    # short bar
@@ -156,6 +156,7 @@ def plot_station(df_station,station_name,mozaic=False):
                     ha='center',        # Horizontal alignment: center
                     va='bottom',        # Vertical alignment: bottom
                     color='black')
+        '''
         
         if not first_GPS:
             cax1 = inset_axes(

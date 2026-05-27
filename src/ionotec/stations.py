@@ -45,6 +45,7 @@ target_dir = base_dir / "output/"
 target_dir.mkdir(parents=True, exist_ok=True)
 print ("Output directory:",target_dir)
 root_dir = str(target_dir)+"/"
+
 #print ("root_dir", root_dir)
 
 #def create_output(folder_name: str) -> Path:
@@ -75,30 +76,25 @@ def resume_station(folder):
     '''
 
     search_dir = Path(folder)
-    #files = list({f.name for f in search_dir.rglob("*o") if f.is_file()})
+    files_o = [f for f in search_dir.rglob("*o") if f.is_file()]
+    files_d = [f for f in search_dir.rglob("*d") if f.is_file()]
 
-    files_dict = {f.name: str(f.resolve()) for f in search_dir.rglob("*o") if f.is_file()}
-
-    # Extract just the full paths into your list
-    files = list(files_dict.values())
-
-    #sys.exit()
+    files = files_o+files_d
     
-    #doyfolder = folder+str(year)+"\\"+str(doy)+"\\"
-    #print ("LIST stations")
-    #files = [f for f in listdir(doyfolder) if isfile(join(doyfolder, f))]
-    #print (files)
     d = {"station":[],"X":[],"Y":[],"Z":[],"resolution(s)":[]}
     for f in files:
-        fname = f.split("\\")[-1] 
-        if f[-1]!="o": continue
+        fname = f.name
+        f_path = f.resolve()
+        #print (f.replace(folder,""))
+        #continue
+        if fname[-1]!="o": continue
         station = fname[:4]
         #print (fname,station)
         if station in d["station"]: continue
 
-        try: header = gr.rinexheader(f)
+        try: header = gr.rinexheader(f_path)
         except ValueError:
-            print ("Error in file",f)
+            print ("Error in file",f_path)
         if "INTERVAL" in header.keys(): interval = float(header["INTERVAL"].replace(" ",""))
         else: interval = 1.0
         pos_antena = header['position']
@@ -124,47 +120,6 @@ def resume_station(folder):
 #    Creates stations.csv that contains information about the navigation
 #    stations
 #    '''
-
-'''   
-    print ("LIST stations")
-    
-    if path.exists(csv_stations) and not force: return
-    #year_folder = root_dir + "TEC/" + str(year)+ "/"
-    for f in listdir(year_folder):
-        doy = f.replace(".zip","")
-        day_folder = year_folder + doy + "/"
-        print (day_folder)
-
-        files = [f for f in listdir(day_folder) if isfile(join(day_folder, f))]
-        d = {"station":[],"X":[],"Y":[],"Z":[],"interval":[]}
-        for f in files:
-            print (f)
-            if f[-1]!="o": continue
-            station = f[:4]
-            if station in d["station"]: continue
-            if ((station+str(doy)+"0."+str(year)[2:]+"o" not in files) and
-                (station+str(doy)+"1."+str(year)[2:]+"o" not in files)): continue
-
-            rinex = station + str(doy) + "0." + str(year)[2:]
-
-            try: header = gr.rinexheader(day_folder+rinex+"o")
-            except ValueError:
-                print ("Error in file",f)
-            if "INTERVAL" in header.keys(): interval = float(header["INTERVAL"].replace(" ",""))
-            else: interval = 1.0
-            pos_antena = header['position']
-            d["station"].append(station)
-            d["X"].append(pos_antena[0])
-            d["Y"].append(pos_antena[1])
-            d["Z"].append(pos_antena[2])
-            d["interval"].append(interval)
-            #d["br"].append(float("nan"))
-    df = pd.DataFrame(d)
-    df.sort_values(by="station",inplace=True)
-    df.to_csv(csv_stations,index=False)
-'''
-
-
 
 def get_closest_stations(p):
     ''' Input: list of three float corresponding to the (X,Y,Z) coordinates
