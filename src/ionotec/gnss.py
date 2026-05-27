@@ -22,7 +22,7 @@
 #  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 #
-#############################################################################3
+#############################################################################
 
 import os,sys,shutil
 
@@ -40,6 +40,7 @@ from warnings import simplefilter
 simplefilter(action='ignore', category=FutureWarning)
 
 import pandas as pd
+from pathlib import Path
 
 pd.options.mode.chained_assignment = None
 
@@ -48,6 +49,7 @@ pd.options.mode.chained_assignment = None
 
 #import matplotlib.pyplot as plt
 from . import stations as st
+from . import rinex as rx
 
 from os import listdir
 from os.path import isfile, join
@@ -56,7 +58,7 @@ from os.path import isfile, join
 Alt_i = 300000
 # Earth Radius
 R_E = 6370000
-omega_e = 7.292115e-5
+omega_e = 7.2921151467e-5
 GM = 3.986005e14
 C20 = -1082.63e-6
 a_major_ellipsoid_axis = 6378136
@@ -71,15 +73,15 @@ WG84_to_PZ90=np.matrix([[1,-0.33/3600.0,0],[0.33/3600.0,1,0],[0,0,1]])
 #dir_sat_bias = "/home/sblunier/Work/spaceweather/data/GNSS/CODE/"
 #dir_sat_bias = dir_rinex_nav
 
-def F1(pos,v):
-	return np.array(v)
+#def F1(pos,v):
+#	return np.array(v)
 
-def F2(pos,v,a):
-	r=np.linalg.norm(pos)
-	xpp = -GM*pos[0]/r**3 + 1.5*C20*GM*a_major_ellipsoid_axis**2 * pos[0] * abs(1-5*pos[2]**2/r**2) / r**5  + omega_e**2*pos[0] + 2*omega_e*v[1]+a[0]
-	ypp = -GM*pos[1]/r**3 + 1.5*C20*GM*a_major_ellipsoid_axis**2 * pos[1] * abs(1-5*pos[2]**2/r**2) / r**5 + omega_e**2*pos[1] - 2*omega_e*v[0]+a[1]
-	zpp = -GM*pos[2]/r**3 + 1.5*C20*GM*a_major_ellipsoid_axis**2 * pos[2] * abs(3-5*pos[2]**2/r**2) / r**5
-	return np.array([xpp,ypp,zpp])
+#def F2(pos,v,a):
+#	r=np.linalg.norm(pos)
+#	xpp = -GM*pos[0]/r**3 + 1.5*C20*GM*a_major_ellipsoid_axis**2 * pos[0] * #abs(1-5*pos[2]**2/r**2) / r**5  + omega_e**2*pos[0] + 2*omega_e*v[1]+a[0]
+#	ypp = -GM*pos[1]/r**3 + 1.5*C20*GM*a_major_ellipsoid_axis**2 * pos[1] * #abs(1-5*pos[2]**2/r**2) / r**5 + omega_e**2*pos[1] - 2*omega_e*v[0]+a[1]
+#	zpp = -GM*pos[2]/r**3 + 1.5*C20*GM*a_major_ellipsoid_axis**2 * pos[2] * #abs(3-5*pos[2]**2/r**2) / r**5
+#	return np.array([xpp,ypp,zpp])
 
 def getDateFromSat(weekNumber,seconds):
 	date_ref = datetime.datetime(1980,1,6,0,0,0)
@@ -119,19 +121,19 @@ def removeOutsiders(df,thres=datetime.timedelta(days=1)):
     df.drop(columns=["out"],inplace=True)    
     return df
 
-def gps_nav_to_XYZ(data,date):
+def qzss_nav_to_XYZ(data,date):
+
+    #print (date)
+    #print (data)
+
+    #sys.exit()
+    #print (data.keys())
+    
     Toe = data['Toe']
-    TGD = data['TGD']
+    #TGD = data['TGD']
     IDOT = data['IDOT']
-    IODC = data['IODC']
-    GPSWeek = data['GPSWeek']
-    TransTime = data['TransTime']
-    #clock correction biais
-    clockBiais = data['SVclockBias']
-    #clock correction drift
-    clockDrift = data['SVclockDrift']
-	#clock correction drift rate
-    clockDriftRate = data['SVclockDriftRate']
+    #IODC = data['IODC']
+    GALWeek = data['GPSWeek']
 	#Square root of the semi-major axis m^{1/2}
     sqrtA =  data['sqrtA']
 	#Eccentricity
@@ -148,8 +150,6 @@ def gps_nav_to_XYZ(data,date):
     DeltaN = data['DeltaN']
 	#Rate of change of right ascension
     OmegaDot = data['OmegaDot']
-	#Rate of change of inclination
-    IDOT = data['IDOT']
 	#Amplitude of the sine harmonic correction term to the argument of latitude (rad)
     Cus = data['Cus']
 	#Amplitude of the cosine harmonic correction term to the argument of latitude (rad)
@@ -163,7 +163,86 @@ def gps_nav_to_XYZ(data,date):
 	#Amplitude of the cosine harmonic correction term to the orbit radius (m)
     Crc = data['Crc']
 
-    d0 = getDateFromSat(GPSWeek,Toe)
+    d0 = getDateFromSat(GALWeek,Toe)
+
+    tk = (date-d0).seconds
+
+    n0 = math.sqrt(GM)/sqrtA**3
+    n = n0 + DeltaN
+
+    Mk = M0 + n*tk
+    Ek = Mk
+    #for i in range(3): Ek = Mk + Eccentricity*math.sin(Ek)
+    for i in range(3): Ek = Ek + (Ek-Eccentricity*math.sin(Ek)-Mk)/(1-Eccentricity*math.cos(Ek))
+
+    sin_vk = math.sqrt(1-Eccentricity**2)*math.sin(Ek) / (1.0-Eccentricity*math.cos(Ek))
+    cos_vk = (math.cos(Ek)-Eccentricity)/(1.0-Eccentricity*math.cos(Ek))
+    vk=0
+    if sin_vk>0: vk = math.acos(cos_vk)
+    else: vk = -math.acos(cos_vk)
+
+    Phik = vk + omega
+    delta_uk = Cuc * math.cos(2*Phik) + Cus * math.sin(2*Phik)
+    delta_rk = Crc * math.cos(2*Phik) + Crs * math.sin(2*Phik)
+    delta_ik = Cic * math.cos(2*Phik) + Cis * math.sin(2*Phik)
+
+    uk = Phik + delta_uk
+    rk = sqrtA**2 * (1 - Eccentricity * math.cos(Ek)) + delta_rk
+    ik = Io + IDOT*tk + delta_ik
+
+    Xk_p = rk * math.cos(uk)
+    Yk_p = rk * math.sin(uk)
+
+    Omegak = Omega0 + (OmegaDot-omega_e)*tk - omega_e * Toe
+
+    Xk = Xk_p * math.cos(Omegak) - Yk_p * math.sin(Omegak)* math.cos(ik)
+    Yk = Xk_p * math.sin(Omegak) + Yk_p * math.cos(Omegak)* math.cos(ik)
+    Zk = Yk_p * math.sin(ik)
+    return [Xk,Yk,Zk]
+
+def beidu_nav_to_XYZ(data,date):
+
+    #print (date)
+    #print (data)
+
+    #sys.exit()
+    #print (data.keys())
+    
+    Toe = data['Toe']
+    #TGD = data['TGD']
+    IDOT = data['IDOT']
+    #IODC = data['IODC']
+    GALWeek = data['BDTWeek']
+	#Square root of the semi-major axis m^{1/2}
+    sqrtA =  data['sqrtA']
+	#Eccentricity
+    Eccentricity =  data['Eccentricity']
+	#Inclination angle at reference time
+    Io =  data['Io']
+	#Longitude of ascending node at reference time
+    Omega0 =  data['Omega0']
+	#Argument of perigee (semicircles)
+    omega = data['omega']
+	#Mean anomaly at reference time (semicircles)
+    M0 = data['M0']
+	#Mean motion difference from computed value
+    DeltaN = data['DeltaN']
+	#Rate of change of right ascension
+    OmegaDot = data['OmegaDot']
+	#Amplitude of the sine harmonic correction term to the argument of latitude (rad)
+    Cus = data['Cus']
+	#Amplitude of the cosine harmonic correction term to the argument of latitude (rad)
+    Cuc = data['Cuc']
+	#Amplitude of the sine harmonic correction term to the angle of inclination (rad)
+    Cis = data['Cis']
+	#Amplitude of the cosine harmonic correction term to the angle of inclination (rad)
+    Cic = data['Cic']
+	#Amplitude of the sine harmonic correction term to the orbit radius (m)
+    Crs = data['Crs']
+	#Amplitude of the cosine harmonic correction term to the orbit radius (m)
+    Crc = data['Crc']
+
+    d0 = getDateFromSat(GALWeek,Toe)
 
     tk = (date-d0).seconds
 
@@ -199,6 +278,245 @@ def gps_nav_to_XYZ(data,date):
     Zk = Yk_p * math.sin(ik)
     return [Xk,Yk,Zk]
 
+def galileo_nav_to_XYZ(data,date):
+
+    #print (date)
+    #print (data)
+
+    #sys.exit()
+    
+    Toe = data['Toe']
+    #TGD = data['TGD']
+    IDOT = data['IDOT']
+    #IODC = data['IODC']
+    GALWeek = data['GALWeek']
+	#Square root of the semi-major axis m^{1/2}
+    sqrtA =  data['sqrtA']
+	#Eccentricity
+    Eccentricity =  data['Eccentricity']
+	#Inclination angle at reference time
+    Io =  data['Io']
+	#Longitude of ascending node at reference time
+    Omega0 =  data['Omega0']
+	#Argument of perigee (semicircles)
+    omega = data['omega']
+	#Mean anomaly at reference time (semicircles)
+    M0 = data['M0']
+	#Mean motion difference from computed value
+    DeltaN = data['DeltaN']
+	#Rate of change of right ascension
+    OmegaDot = data['OmegaDot']
+	#Amplitude of the sine harmonic correction term to the argument of latitude (rad)
+    Cus = data['Cus']
+	#Amplitude of the cosine harmonic correction term to the argument of latitude (rad)
+    Cuc = data['Cuc']
+	#Amplitude of the sine harmonic correction term to the angle of inclination (rad)
+    Cis = data['Cis']
+	#Amplitude of the cosine harmonic correction term to the angle of inclination (rad)
+    Cic = data['Cic']
+	#Amplitude of the sine harmonic correction term to the orbit radius (m)
+    Crs = data['Crs']
+	#Amplitude of the cosine harmonic correction term to the orbit radius (m)
+    Crc = data['Crc']
+
+    d0 = getDateFromSat(GALWeek,Toe)
+
+    tk = (date-d0).seconds
+
+    n0 = math.sqrt(GM)/sqrtA**3
+    n = n0 + DeltaN
+
+    Mk = M0 + n*tk
+    Ek = Mk
+    for i in range(3): Ek = Mk + Eccentricity*math.sin(Ek)
+
+    sin_vk = math.sqrt(1-Eccentricity**2)*math.sin(Ek) / (1.0-Eccentricity*math.cos(Ek))
+    cos_vk = (math.cos(Ek)-Eccentricity)/(1.0-Eccentricity*math.cos(Ek))
+    vk=0
+    if sin_vk>0: vk = math.acos(cos_vk)
+    else: vk = -math.acos(cos_vk)
+
+    Phik = vk + omega
+    delta_uk = Cuc * math.cos(2*Phik) + Cus * math.sin(2*Phik)
+    delta_rk = Crc * math.cos(2*Phik) + Crs * math.sin(2*Phik)
+    delta_ik = Cic * math.cos(2*Phik) + Cis * math.sin(2*Phik)
+
+    uk = Phik + delta_uk
+    rk = sqrtA**2 * (1 - Eccentricity * math.cos(Ek)) + delta_rk
+    ik = Io + IDOT*tk + delta_ik
+
+    Xk_p = rk * math.cos(uk)
+    Yk_p = rk * math.sin(uk)
+
+    Omegak = Omega0 + (OmegaDot-omega_e)*tk - omega_e * Toe
+
+    Xk = Xk_p * math.cos(Omegak) - Yk_p * math.sin(Omegak)* math.cos(ik)
+    Yk = Xk_p * math.sin(Omegak) + Yk_p * math.cos(Omegak)* math.cos(ik)
+    Zk = Yk_p * math.sin(ik)
+    return [Xk,Yk,Zk]
+
+def gps_nav_to_XYZ(data,date):
+
+    #print (date)
+    #print (data)
+
+    #sys.exit()
+    
+    Toe = data['Toe']
+    #TGD = data['TGD']
+    IDOT = data['IDOT']
+    #IODC = data['IODC']
+    GPSWeek = data['GPSWeek']
+	#Square root of the semi-major axis m^{1/2}
+    sqrtA =  data['sqrtA']
+	#Eccentricity
+    e =  data['Eccentricity']
+	#Inclination angle at reference time
+    Io =  data['Io']
+	#Longitude of ascending node at reference time
+    Omega0 =  data['Omega0']
+	#Argument of perigee (semicircles)
+    omega = data['omega']
+	#Mean anomaly at reference time (semicircles)
+    M0 = data['M0']
+	#Mean motion difference from computed value
+    DeltaN = data['DeltaN']
+	#Rate of change of right ascension
+    OmegaDot = data['OmegaDot']
+	#Amplitude of the sine harmonic correction term to the argument of latitude (rad)
+    Cus = data['Cus']
+	#Amplitude of the cosine harmonic correction term to the argument of latitude (rad)
+    Cuc = data['Cuc']
+	#Amplitude of the sine harmonic correction term to the angle of inclination (rad)
+    Cis = data['Cis']
+	#Amplitude of the cosine harmonic correction term to the angle of inclination (rad)
+    Cic = data['Cic']
+	#Amplitude of the sine harmonic correction term to the orbit radius (m)
+    Crs = data['Crs']
+	#Amplitude of the cosine harmonic correction term to the orbit radius (m)
+    Crc = data['Crc']
+    d0 = getDateFromSat(GPSWeek,Toe)
+
+    #print ('\t date=',date)
+    #print ('\t d0=',d0)
+    #print ('\t date-d0=',date-d0)
+    
+    tk = (date-d0).total_seconds()
+
+    #if date==datetime.datetime(2024,5,7,20,0,0,0):
+    #    print (date,tk,data['sv'])
+    
+
+    #print ('\t tk=',tk)
+
+    n0 = math.sqrt(GM)/sqrtA**3
+    #print ('\t n0=',n0)
+    n = n0 + DeltaN
+
+    #print ('\t n=',n)
+    
+    Mk = M0 + n*tk
+    Ek = Mk
+    #for i in range(3): Ek = Mk + e*math.sin(Ek)
+    for i in range(3):
+        Ek = Ek - (Ek-e*math.sin(Ek)-Mk)/(1-e*math.cos(Ek))
+        #print ('\t i = ',i, 'Ek=',Ek)
+    
+    #sin_vk = math.sqrt(1-e**2)*math.sin(Ek) / (1.0-e*math.cos(Ek))
+    #cos_vk = (math.cos(Ek)-e)/(1.0-e*math.cos(Ek))
+    #vk=0
+    #if sin_vk>0: vk = math.acos(cos_vk)
+    #else: vk = -math.acos(cos_vk)
+
+    vk = 2*math.atan(math.sqrt((1+e)/(1-e))*math.tan(Ek/2))
+    
+    Phik = vk + omega
+    delta_uk = Cuc * math.cos(2*Phik) + Cus * math.sin(2*Phik)
+    delta_rk = Crc * math.cos(2*Phik) + Crs * math.sin(2*Phik)
+    delta_ik = Cic * math.cos(2*Phik) + Cis * math.sin(2*Phik)
+
+    uk = Phik + delta_uk
+    rk = sqrtA**2 * (1 - e * math.cos(Ek)) + delta_rk
+    ik = Io + IDOT*tk + delta_ik
+
+    Xk_p = rk * math.cos(uk)
+    Yk_p = rk * math.sin(uk)
+
+    Omegak = Omega0 + (OmegaDot-omega_e)*tk - omega_e * Toe
+
+    Xk = Xk_p * math.cos(Omegak) - Yk_p * math.sin(Omegak)* math.cos(ik)
+    Yk = Xk_p * math.sin(Omegak) + Yk_p * math.cos(Omegak)* math.cos(ik)
+    Zk = Yk_p * math.sin(ik)
+    
+    return [Xk,Yk,Zk]
+
+
+def remove_duplicated_dates(file_path):
+
+  f = open(file_path,'r')
+
+  is_header = True
+  i = 0
+  data_line_batch = ""
+  dict_prn_dates = {}
+
+  new_file_lines = ""
+
+  for line in f:
+
+    # Check where is the header, just to copy in the new file
+    if "END OF HEADER" in line:
+      is_header = False
+      new_file_lines += line
+      continue
+    # If we are in the header copy and next line
+    if is_header:
+      new_file_lines += line
+      continue
+
+    # if we are in the first line of the data for a PRN and date, read date
+    if i%8==0:
+      # First time there is nothing to write yet.
+      if i!=0:
+        # If the satellite was already found before, 
+        # check that the date was not already seen
+        if PRN in dict_prn_dates.keys():
+          # If date not seen, add it to seen dates, and add data_batch to new file 
+          #    else do nothing
+          if date not in dict_prn_dates[PRN]:
+            dict_prn_dates[PRN].append(date)
+            new_file_lines += data_line_batch
+        # If satellite not found, then create key, put date in dict
+        #    and copy data_batch to new file
+        else:
+          dict_prn_dates[PRN] = [date]
+          new_file_lines += data_line_batch
+
+      #print (file_path)
+     # print (line)
+      PRN = line[:3]
+      # Get date
+      date = datetime.datetime.strptime(line[4:23],"%Y %m %d %H %M %S")
+
+      # Empty data_line_batch
+      data_line_batch = ""
+    
+    data_line_batch += line
+    i += 1
+
+  ## Do the last data since it is not processed at the end of the loop.
+  if PRN in dict_prn_dates.keys():
+    if date not in dict_prn_dates[PRN]:
+      new_file_lines += data_line_batch
+  else: 
+    new_file_lines += data_line_batch
+  f.close()
+
+  f = open(file_path,'w')
+  f.write(new_file_lines)
+  f.close()
+
+
 #dir_sats = "sats/"
 
 class gnss:
@@ -218,17 +536,13 @@ class gnss:
 
     list_f_rinex_nav = []
 
-    #list_cols_gps = ["Toe","TGD","IDOT","IODC","GPSWeek","TransTime","SVclockBias","SVclockDrift",\
-    #    "SVclockDriftRate","sqrtA","Eccentricity","Io","Omega0","omega","M0","DeltaN","OmegaDot","Cus","Cuc",\
-    #    "Cis","Crs","Crc","Cic"] 
-    #list_cols_glonass = ["sv","X","Y","Z","dX","dY","dZ","dX2","dY2","dZ2"]
-
-
     rinex_doy = 1
     rinex_year = 2020
     f_doy_reported = ""
+
     
-    def __init__(self,f_nav=[],resolution=60,form='feather'):
+    
+    def __init__(self,f_nav=[],resolution=30,form='feather'):
         
         self.gnss_dir = st.root_dir + "GNSS/"
         
@@ -254,6 +568,8 @@ class gnss:
 
     def inform_date_processed(self,list_date,constellation):
 
+        #print ("inform_date_processed",constellation)
+        
         # Make sure there is data before 10:00
         cutoff_I = datetime.time(4, 0)
         cutoff_F = datetime.time(20, 0)
@@ -262,9 +578,7 @@ class gnss:
             for dt in list_date
                 if (dt.time() < cutoff_F) and (cutoff_I > dt.time())
         }
-        #print (list_date)
-        #print (constellation)
-        #print (dates)
+
 
         for date in dates:  
             if date in self.dict_doy_processed.keys():
@@ -272,12 +586,8 @@ class gnss:
                     (self.dict_doy_processed[date][constellation+"_res"]==0):
                     self.dict_doy_processed[date][constellation+"_res"] = self.resolution
             else:
-                self.dict_doy_processed[date] = {"G_res":0,"R_res":0}
-                #self.dict_doy_processed["date"].append(date)
-                #self.dict_doy_processed["G_res"].append(0)
-                #self.dict_doy_processed["R_res"].append(0)
+                self.dict_doy_processed[date] = {"G_res":0,"R_res":0,"E_res":0,"C_res":0,"J_res":0,"S_res":0}
                 self.dict_doy_processed[date][constellation+"_res"]=self.resolution
-        #print (self.dict_doy_processed)
     
     # Function that compute the position of the satellites from the navigation file 
     #   with the resolution informed when instanciating the gnss object
@@ -285,60 +595,96 @@ class gnss:
 
         list_nav_gps = []
         self.df_nav_glonass = pd.DataFrame()
-        self.df_nav_gps = pd.DataFrame()      
+        self.df_nav_gps = pd.DataFrame() 
+        self.df_nav_galileo = pd.DataFrame()
+        self.df_nav_beidu = pd.DataFrame()
+        self.df_nav_qzss = pd.DataFrame()
+        self.df_nav_sbas = pd.DataFrame()
         
         if os.path.exists(self.csv_record_processing):
             df_doy_processed = pd.read_csv(self.csv_record_processing,index_col="time")
-            #df_doy_processed = df_doy_processed.T
-            #print (df_doy_processed)
+
             df_doy_processed.index = pd.to_datetime(df_doy_processed.index).date
             df_doy_processed = df_doy_processed.T
             self.dict_doy_processed = df_doy_processed.to_dict()
-        #self.dict_dict_processed.index = pd.to_datetime(df_doy_processed["time"]).dt.date
-        #print (self.dict_doy_processed)
-        #sys.exit()
-        
+
+        #print (self.list_f_rinex_nav)
         for f_rinex_nav in self.list_f_rinex_nav:
-            #print (f_rinex_nav)
-            nav = gr.load(f_rinex_nav)
-            head = nav.head()
-            svtype = head.svtype[0]
             
-            df_nav = nav.to_dataframe()
+            try:
+                nav = rx.rinex(f_rinex_nav)
+            except: continue
+            #print (nav)
+            head = nav.read_header()
+            svtype = head['constellation']
+            
+            df_nav = nav.read_data()
+
+            #print (f_rinex_nav)
             #print (df_nav)
+            
+            if len(df_nav)==0: continue
+
+            
             df_nav.index.set_names(["time","sv"],inplace=True)
             df_nav.reset_index(level=["sv"],inplace=True)
+            #print (df_nav)
+            for c in df_nav.columns:
+                if 'spare' in c:
+                    df_nav.drop(columns=[c],inplace=True)
             df_nav.dropna(inplace=True)
 
-            df_nav.index = pd.to_datetime(df_nav.index)
-            if len(df_nav)==0: 
-                #print ("----------------------",f_rinex_nav)
-                continue
-            #print (f_rinex_nav)
-            
             #print (df_nav)
+
+            #print (df_nav.head(30))
+            #sys.exit()
+
+            df_nav.index = pd.to_datetime(df_nav.index)
+
+            #print (df_nav)
+            if len(df_nav)==0: 
+                continue
 
             date = df_nav.index[int(len(df_nav)/2)].date()
-            #print ("date",f_rinex_nav,date)
-
             
             df_nav.sort_index(ascending=True,inplace=True)
-            #print (df_nav)
-            #filename = head.filename
-            #df_nav["sta"]  = filename[:4]
+
             if svtype=='R':
                 if date in self.dict_doy_processed.keys():
-                    #if self.dict_doy_processed[date]["R_res"]==0: continue
                     if self.dict_doy_processed[date]["R_res"]>=self.resolution: continue
                 self.df_nav_glonass = pd.concat([self.df_nav_glonass,df_nav[["sv","X","Y","Z"]]])
             elif svtype=='G':
                 if date in self.dict_doy_processed.keys():
-                    #if self.dict_doy_processed[date]["G_res"]==0: continue
                     if self.dict_doy_processed[date]["G_res"]>=self.resolution: continue
                 self.df_nav_gps = pd.concat([self.df_nav_gps,df_nav])
-
+            elif svtype=='E':
+                if date in self.dict_doy_processed.keys():
+                    if self.dict_doy_processed[date]["E_res"]>=self.resolution: continue
+                self.df_nav_galileo = pd.concat([self.df_nav_galileo,df_nav])
+            elif svtype=='C':
+                if date in self.dict_doy_processed.keys():
+                    if self.dict_doy_processed[date]["C_res"]>=self.resolution: continue
+                self.df_nav_beidu = pd.concat([self.df_nav_beidu,df_nav])
+            elif svtype=='J':
+                if date in self.dict_doy_processed.keys():
+                    if self.dict_doy_processed[date]["J_res"]>=self.resolution: continue
+                self.df_nav_qzss = pd.concat([self.df_nav_qzss,df_nav])
+            elif svtype=='S':
+                if date in self.dict_doy_processed.keys():
+                    #print (self.dict_doy_processed)
+                    if self.dict_doy_processed[date]["S_res"]>=self.resolution: continue
+                self.df_nav_sbas = pd.concat([self.df_nav_sbas,df_nav])
+                #print ("SBAS")
+                #print (self.df_nav_sbas['sv'].unique())
+                #print (self.df_nav_sbas)
+        #sys.exit()
+        
+        self.compute_galileo_pos()
         self.compute_gps_pos()
         self.compute_glonass_pos()
+        self.compute_beidu_pos()
+        self.compute_qzss_pos()
+        self.compute_sbas_pos()
 
         df_doy_processed = pd.DataFrame(self.dict_doy_processed)
         df_doy_processed = df_doy_processed.transpose()
@@ -348,35 +694,234 @@ class gnss:
         #print (df_doy_processed)
         df_doy_processed.to_csv(self.csv_record_processing,index=True)
 
+    def compute_qzss_pos(self):
+        if (len(self.df_nav_qzss)<=2): return
+
+        list_sv = self.df_nav_qzss["sv"].unique().tolist()
+        self.df_nav_qzss = self.df_nav_qzss.groupby(["time","sv"]).mean()
+        self.df_nav_qzss.reset_index(level=["sv"],inplace=True)
+        list_times = []
+        
+        for sv in list_sv:
+            df_sat = self.df_nav_qzss[self.df_nav_qzss["sv"]==sv]
+            if len(df_sat)<3: continue
+
+            df_sat = removeOutsiders(df_sat)
+            list_times = list_times+df_sat.index.tolist()
+
+            min_date = min(df_sat.index)
+            max_date = max(df_sat.index)
+            
+            qzss_time_list = []
+            t = min_date
+                        
+            while t<=max_date:
+                qzss_time_list.append(t)
+                t = t+datetime.timedelta(seconds=self.resolution)
+
+            i_time_list = 0
+            date = qzss_time_list[i_time_list]
+            # Intermediate dictionary intended to contain data of the satellite under process 
+            dict_sat_pos = {"time":[],"X":[],"Y":[],"Z":[]}
+            for t_nav, row in df_sat.iterrows():
+                # Calculate position for each time in time_list that are before the next available position information
+                while date < t_nav and i_time_list<len(qzss_time_list):
+                    sat_pos = qzss_nav_to_XYZ(row,date)
+                    dict_sat_pos["time"].append(date)
+                    dict_sat_pos["X"].append(sat_pos[0])
+                    dict_sat_pos["Y"].append(sat_pos[1])
+                    dict_sat_pos["Z"].append(sat_pos[2])
+                    i_time_list += 1
+                    if i_time_list==len(qzss_time_list): break
+                    date = qzss_time_list[i_time_list]
+
+            # Case navigation data does not provide position until 00:00, use last available date 
+            while i_time_list<len(qzss_time_list):
+                sat_pos = qzss_nav_to_XYZ(row,date)
+                dict_sat_pos["time"].append(date)
+                dict_sat_pos["X"].append(sat_pos[0])
+                dict_sat_pos["Y"].append(sat_pos[1])
+                dict_sat_pos["Z"].append(sat_pos[2])
+                i_time_list += 1
+                if i_time_list==len(qzss_time_list): break
+                date = qzss_time_list[i_time_list]
+
+            df_sat = pd.DataFrame(dict_sat_pos)
+            df_sat["time"] = pd.to_datetime(df_sat["time"])
+            df_sat.set_index("time",inplace=True)
+            
+            list_years = list({d.year for d in df_sat.index.tolist()})
+            for y in list_years:
+                df_year = df_sat[df_sat.index.year == y].dropna()
+                csv_nav_sat = self.gnss_dir + str(y) + "/" + sv + ".feather"
+                if not os.path.exists(self.gnss_dir + str(y)): os.mkdir(self.gnss_dir + str(y))
+
+                if os.path.exists(csv_nav_sat):
+                    df_former_sat = pd.read_feather(csv_nav_sat)
+                    df_sat = pd.concat([df_sat,df_former_sat])
+                df_sat.to_feather(csv_nav_sat)
+
+        list_times = sorted(list(set(list_times)))
+        self.inform_date_processed(list_times,'J')
+        
+    def compute_beidu_pos(self):
+        if (len(self.df_nav_beidu)<=2): return
+
+        #print (self.df_nav_beidu)
+        
+        list_sv = self.df_nav_beidu["sv"].unique().tolist()
+        self.df_nav_beidu = self.df_nav_beidu.groupby(["time","sv"]).mean()
+        self.df_nav_beidu.reset_index(level=["sv"],inplace=True)
+        list_times = []
+        
+        for sv in list_sv:
+            df_sat = self.df_nav_beidu[self.df_nav_beidu["sv"]==sv]
+            if len(df_sat)<3: continue
+
+            df_sat = removeOutsiders(df_sat)
+            list_times = list_times+df_sat.index.tolist()
+
+            min_date = min(df_sat.index)
+            max_date = max(df_sat.index)
+            
+            beidu_time_list = []
+            t = min_date
+                        
+            while t<=max_date:
+                beidu_time_list.append(t)
+                t = t+datetime.timedelta(seconds=self.resolution)
+
+            i_time_list = 0
+            date = beidu_time_list[i_time_list]
+            # Intermediate dictionary intended to contain data of the satellite under process 
+            dict_sat_pos = {"time":[],"X":[],"Y":[],"Z":[]}
+            for t_nav, row in df_sat.iterrows():
+                # Calculate position for each time in time_list that are before the next available position information
+                while date < t_nav and i_time_list<len(beidu_time_list):
+                    sat_pos = beidu_nav_to_XYZ(row,date)
+                    dict_sat_pos["time"].append(date)
+                    dict_sat_pos["X"].append(sat_pos[0])
+                    dict_sat_pos["Y"].append(sat_pos[1])
+                    dict_sat_pos["Z"].append(sat_pos[2])
+                    i_time_list += 1
+                    if i_time_list==len(beidu_time_list): break
+                    date = beidu_time_list[i_time_list]
+
+            # Case navigation data does not provide position until 00:00, use last available date 
+            while i_time_list<len(beidu_time_list):
+                sat_pos = beidu_nav_to_XYZ(row,date)
+                dict_sat_pos["time"].append(date)
+                dict_sat_pos["X"].append(sat_pos[0])
+                dict_sat_pos["Y"].append(sat_pos[1])
+                dict_sat_pos["Z"].append(sat_pos[2])
+                i_time_list += 1
+                if i_time_list==len(beidu_time_list): break
+                date = beidu_time_list[i_time_list]
+
+            df_sat = pd.DataFrame(dict_sat_pos)
+            df_sat["time"] = pd.to_datetime(df_sat["time"])
+            df_sat.set_index("time",inplace=True)
+            
+            list_years = list({d.year for d in df_sat.index.tolist()})
+            for y in list_years:
+                df_year = df_sat[df_sat.index.year == y].dropna()
+                csv_nav_sat = self.gnss_dir + str(y) + "/" + sv + ".feather"
+                if not os.path.exists(self.gnss_dir + str(y)): os.mkdir(self.gnss_dir + str(y))
+
+                if os.path.exists(csv_nav_sat):
+                    df_former_sat = pd.read_feather(csv_nav_sat)
+                    df_sat = pd.concat([df_sat,df_former_sat])
+                df_sat.to_feather(csv_nav_sat)
+
+        list_times = sorted(list(set(list_times)))
+        self.inform_date_processed(list_times,'C')
+
+    def compute_galileo_pos(self):
+        if (len(self.df_nav_galileo)<=2): return
+        
+        list_sv = self.df_nav_galileo["sv"].unique().tolist()
+        self.df_nav_galileo = self.df_nav_galileo.groupby(["time","sv"]).mean()
+        self.df_nav_galileo.reset_index(level=["sv"],inplace=True)
+        list_times = []
+        
+        for sv in list_sv:
+            df_sat = self.df_nav_galileo[self.df_nav_galileo["sv"]==sv]
+            if len(df_sat)<3: continue
+
+            df_sat = removeOutsiders(df_sat)
+            list_times = list_times+df_sat.index.tolist()
+
+            min_date = min(df_sat.index)
+            max_date = max(df_sat.index)
+            
+            galileo_time_list = []
+            t = min_date
+                        
+            while t<=max_date:
+                galileo_time_list.append(t)
+                t = t+datetime.timedelta(seconds=self.resolution)
+
+            i_time_list = 0
+            date = galileo_time_list[i_time_list]
+            # Intermediate dictionary intended to contain data of the satellite under process 
+            dict_sat_pos = {"time":[],"X":[],"Y":[],"Z":[]}
+            for t_nav, row in df_sat.iterrows():
+                # Calculate position for each time in time_list that are before the next available position information
+                while date < t_nav and i_time_list<len(galileo_time_list):
+                    sat_pos = galileo_nav_to_XYZ(row,date)
+                    dict_sat_pos["time"].append(date)
+                    dict_sat_pos["X"].append(sat_pos[0])
+                    dict_sat_pos["Y"].append(sat_pos[1])
+                    dict_sat_pos["Z"].append(sat_pos[2])
+                    i_time_list += 1
+                    if i_time_list==len(galileo_time_list): break
+                    date = galileo_time_list[i_time_list]
+
+            # Case navigation data does not provide position until 00:00, use last available date 
+            while i_time_list<len(galileo_time_list):
+                sat_pos = galileo_nav_to_XYZ(row,date)
+                dict_sat_pos["time"].append(date)
+                dict_sat_pos["X"].append(sat_pos[0])
+                dict_sat_pos["Y"].append(sat_pos[1])
+                dict_sat_pos["Z"].append(sat_pos[2])
+                i_time_list += 1
+                if i_time_list==len(galileo_time_list): break
+                date = galileo_time_list[i_time_list]
+
+            df_sat = pd.DataFrame(dict_sat_pos)
+            df_sat["time"] = pd.to_datetime(df_sat["time"])
+            df_sat.set_index("time",inplace=True)
+            
+            list_years = list({d.year for d in df_sat.index.tolist()})
+            for y in list_years:
+                df_year = df_sat[df_sat.index.year == y].dropna()
+                csv_nav_sat = self.gnss_dir + str(y) + "/" + sv + ".feather"
+                if not os.path.exists(self.gnss_dir + str(y)): os.mkdir(self.gnss_dir + str(y))
+
+                if os.path.exists(csv_nav_sat):
+                    df_former_sat = pd.read_feather(csv_nav_sat)
+                    df_sat = pd.concat([df_sat,df_former_sat])
+                if form=='feather': df_sat.to_feather(csv_nav_sat)
+
+        list_times = sorted(list(set(list_times)))
+        self.inform_date_processed(list_times,'E')
+        
     def compute_gps_pos(self):
         if (len(self.df_nav_gps)<=2): return
-
-        #print ("GPS POS")
-        #self.df_nav_gps.index.set_names(["time","sv"],inplace=True)
-        #self.df_nav_gps.reset_index(level=["sv"],inplace=True)
-        #self.df_nav_gps.dropna(inplace=True)
-
-        #self.df_nav_gps.index = pd.to_datetime(self.df_nav_gps.index)
-        #self.df_nav_gps.sort_index(ascending=True,inplace=True)
         
         list_sv = self.df_nav_gps["sv"].unique().tolist()
         self.df_nav_gps = self.df_nav_gps.groupby(["time","sv"]).mean()
         self.df_nav_gps.reset_index(level=["sv"],inplace=True)
-        list_times = []#self.df_nav_gps.index
+        list_times = []
         
         for sv in list_sv:
+            #if sv!="G02": continue
             df_sat = self.df_nav_gps[self.df_nav_gps["sv"]==sv]
             if len(df_sat)<3: continue
-            #df_sat_new = df_sat_new.groupby(["time","sv"]).mean()
-            #df_sat_new.reset_index(level=["sv"],inplace=True)
+
             df_sat = removeOutsiders(df_sat)
             list_times = list_times+df_sat.index.tolist()
 
-            # If no data has been found for this satellite, go for next one without creating the feather
-            #if len(df_sat)==0:
-            #    print ("No position for satellite",sv)
-            #    continue
-                
             min_date = min(df_sat.index)
             max_date = max(df_sat.index)
             
@@ -387,14 +932,15 @@ class gnss:
                 gps_time_list.append(t)
                 t = t+datetime.timedelta(seconds=self.resolution)
 
-            #print (self.gps_time_list)
             i_time_list = 0
             date = gps_time_list[i_time_list]
-            # Intermediate dictionnary intended to contain data of the satellite under process 
+            # Intermediate dictionary intended to contain data of the satellite under process 
             dict_sat_pos = {"time":[],"X":[],"Y":[],"Z":[]}
             for t_nav, row in df_sat.iterrows():
                 # Calculate position for each time in time_list that are before the next available position information
                 while date < t_nav and i_time_list<len(gps_time_list):
+                    #print (sv,date,row)
+                    
                     sat_pos = gps_nav_to_XYZ(row,date)
                     dict_sat_pos["time"].append(date)
                     dict_sat_pos["X"].append(sat_pos[0])
@@ -406,6 +952,7 @@ class gnss:
 
             # Case navigation data does not provide position until 00:00, use last available date 
             while i_time_list<len(gps_time_list):
+                #print (date)
                 sat_pos = gps_nav_to_XYZ(row,date)
                 dict_sat_pos["time"].append(date)
                 dict_sat_pos["X"].append(sat_pos[0])
@@ -418,50 +965,25 @@ class gnss:
             df_sat = pd.DataFrame(dict_sat_pos)
             df_sat["time"] = pd.to_datetime(df_sat["time"])
             df_sat.set_index("time",inplace=True)
-            #df_sat.reset_index(inplace=True)
-            #print (df_sat)
+            
             list_years = list({d.year for d in df_sat.index.tolist()})
             for y in list_years:
                 df_year = df_sat[df_sat.index.year == y].dropna()
                 csv_nav_sat = self.gnss_dir + str(y) + "/" + sv + ".feather"
                 if not os.path.exists(self.gnss_dir + str(y)): os.mkdir(self.gnss_dir + str(y))
-                #df_sat.to_feather(csv_nav_sat)
-                #csv_nav_sat = self.gnss_dir + str(y) + "/" + sv + ".csv"
-                #print (csv_nav_sat)
+
                 if os.path.exists(csv_nav_sat):
                     df_former_sat = pd.read_feather(csv_nav_sat)
                     df_sat = pd.concat([df_sat,df_former_sat])
-                    #print (df_sat)
                 df_sat.to_feather(csv_nav_sat)
 
         list_times = sorted(list(set(list_times)))
-        #list_times = sorted(list_times)
         self.inform_date_processed(list_times,'G')
 
     
     def compute_glonass_pos(self):
         if (len(self.df_nav_glonass)<=2): return
 
-        #print ("GLONASS POS")
-        #self.df_nav_glonass.index.set_names(["time","sv"],inplace=True)
-        #self.df_nav_glonass.reset_index(level=["sv"],inplace=True)
-        #self.df_nav_glonass.dropna(inplace=True)
-        
-        #self.df_nav_glonass.index = pd.to_datetime(self.df_nav_glonass.index)
-        #self.df_nav_glonass.sort_index(ascending=True,inplace=True)
-
-        #min_date = min(self.df_nav_glonass.index)
-        #max_date = max(self.df_nav_glonass.index)
-
-        #self.glonass_time_list = []
-        #t = min_date
-        #while t<=max_date:
-        #    self.glonass_time_list.append(t)
-        #    t = t+datetime.timedelta(seconds=self.resolution)
-        #print (self.glonass_time_list)
-        #self.df_nav_glonass = self.df_nav_glonass[["sv","X","Y","Z","dX","dY","dZ","dX2","dY2","dZ2"]]#.iloc[8:38]
-        #self.df_nav_glonass = self.df_nav_glonass[["sv","X","Y","Z"]]#.iloc[8:38]
-        #pd.set_option('display.precision', 15)
         self.df_nav_glonass = self.df_nav_glonass.groupby(["time","sv"]).mean()
         self.df_nav_glonass.reset_index(level=["sv"],inplace=True)
         list_times = self.df_nav_glonass.index
@@ -499,10 +1021,58 @@ class gnss:
                 
         self.inform_date_processed(list_times,'R')
 
+    def compute_sbas_pos(self):
+        if (len(self.df_nav_sbas)<=2): return
+
+        self.df_nav_sbas = self.df_nav_sbas.groupby(["time","sv"]).mean()
+        self.df_nav_sbas.reset_index(level=["sv"],inplace=True)
+        list_times = self.df_nav_sbas.index
+
+        #print (self.df_nav_sbas)
         
+        list_sv = self.df_nav_sbas["sv"].unique().tolist()
+        for sv in list_sv:
+            df_sat = self.df_nav_sbas[self.df_nav_sbas["sv"]==sv]
+            if len(df_sat)<3: continue
+
+            #print (df_sat)
+            df_sat = removeOutsiders(df_sat)
+            if len(df_sat)<3: continue
+
+            min_date = min(df_sat.index)
+            max_date = max(df_sat.index)
+            sbas_time_list = []
+            t = min_date.replace(second=0)
+            max_date.replace(second=0)
+            max_date = max_date+datetime.timedelta(seconds=self.resolution)  
+
+            while t<=max_date:
+                sbas_time_list.append(t)
+                t = t+datetime.timedelta(seconds=self.resolution)            
+            
+            new_index = df_sat.index.union(sbas_time_list)
+            df_interp = df_sat.reindex(new_index).sort_index()
+
+            df_interp = df_interp[['X','Y','Z']].interpolate(method='quadratic',axis=0)
+            df_interp = df_interp[df_interp.index.isin(sbas_time_list)].dropna()
+
+            list_years = list({d.year for d in df_interp.index.tolist()})
+            for y in list_years:
+                df_year = df_interp[df_interp.index.year == y].dropna()
+                csv_nav_sat = self.gnss_dir + str(y) + "/" + sv + ".feather"
+                if not os.path.exists(self.gnss_dir + str(y)): os.mkdir(self.gnss_dir + str(y))
+                if os.path.exists(csv_nav_sat):
+                    df_former_sat = pd.read_feather(csv_nav_sat)
+                    df_year = pd.concat([df_year,df_former_sat])
+                #print (df_year)
+                #print (csv_nav_sat)
+                    #sys.exit()
+                df_year.to_feather(csv_nav_sat)  
+                
+        self.inform_date_processed(list_times,'S')        
             
     # Function that loads the satellite of a specific year, files must exist, otherwise load empty
-    def load_sats(self,d_in,d_out):
+    def load_sats(self,const,d_in,d_out):
 
         '''
             Constellation: G: GPS
@@ -513,44 +1083,67 @@ class gnss:
         year = d_in.year
         first = True
 
-        nsat = 36
-         
-        for n_sat,g in [(self.n_sat_gps,"G"),(self.n_sat_glonass,"R"),(self.n_sat_galileo,"E")]:
-            for i in range(1,n_sat+1):
-                #Name of the satellite
-                sat = ""
-                if i<10: sat = g+"0"+str(i)
-                else: sat = g+str(i)
-    
-                sat_file = self.gnss_dir + str(year) + "/" + sat + ".feather"
-                #sat_file = self.gps_dir + str(year) + "/" + sat + ".csv"
-    
-                if os.path.exists(sat_file):
-                    self.dict_df_pos[sat] = pd.read_feather(sat_file)
-                    #self.dict_df_pos[sat] = pd.read_csv(sat_file)
-                    #print (sat)
-                    #print (self.dict_df_pos[sat])
-                    #self.dict_df_pos[sat].set_index("time",inplace=True)
-                    self.dict_df_pos[sat].index = pd.to_datetime(self.dict_df_pos[sat].index)
-                    mask = (self.dict_df_pos[sat].index>=d_in) & (self.dict_df_pos[sat].index<=d_out)
-                    self.dict_df_pos[sat]=self.dict_df_pos[sat].loc[mask]
-                    if first:
-                        self.df_pos = self.dict_df_pos[sat]
-                        self.df_pos["sv"] = sat
-                        first = False
-                    else:
-                        df_inter = self.dict_df_pos[sat]
-                        df_inter["sv"] = sat
-                        self.df_pos = pd.concat([self.df_pos,df_inter])
-                else:
-                    self.dict_df_pos[sat] = pd.DataFrame()
+        gnss_data_dir = Path(self.gnss_dir + str(year) )
+
+        folder = Path(gnss_data_dir)
+        list_gnss = [f for f in folder.glob(const+'*feather') if f.is_file()]
+        
+        #print ("list_gnss",const)
+        #print (list_gnss)
+        #print (self.df_pos)
+        for fgnss in list_gnss:
+          
+            sat_path = fgnss.resolve()
+            sat_file = fgnss.name
+            split_sat = sat_file.split(".")
+
+            if split_sat[-1]!="feather": continue
+            sat = split_sat[0]
+            
+            self.dict_df_pos[sat] = pd.read_feather(sat_path)
+            #print (self.dict_df_pos[sat])
+            #print ("HERE")
+            #sys.exit()
+            #if const=='S': print (self.dict_df_pos[sat])
+            #if sat=="G02": 
+                #print (self.dict_df_pos[sat])
+                #sys.exit()
+            #self.dict_df_pos[sat] = pd.read_csv(sat_file)
+            #print (sat)
+            #print (self.dict_df_pos[sat])
+            #self.dict_df_pos[sat].set_index("time",inplace=True)
+            self.dict_df_pos[sat].index = pd.to_datetime(self.dict_df_pos[sat].index)
+            #print (self.dict_df_pos[sat])
+            #sys.exit()
+            mask = (self.dict_df_pos[sat].index>=d_in) & (self.dict_df_pos[sat].index<=d_out)
+            self.dict_df_pos[sat]=self.dict_df_pos[sat].loc[mask]
+
+            if first:
+                self.df_pos = self.dict_df_pos[sat]
+                self.df_pos["sv"] = sat
+                first = False
+            else:
+                df_inter = self.dict_df_pos[sat]
+                df_inter["sv"] = sat
+                self.df_pos = pd.concat([self.df_pos,df_inter])
+        #if len(self.df_pos)!=0:
+            #print (self.df_pos)
+            #print (self.df_pos["sv"].unique())
+            #sys.exit()
 
     
     def getElevation(self,df,pos_antena):
 
         norm_antena = np.linalg.norm(pos_antena)
         
-        dfdif = pd.DataFrame()   
+        dfdif = pd.DataFrame() 
+        if len(self.df_pos)==0: 
+            #print ("Non elevation")
+            df["X"] = float('NaN')
+            df["Y"] = float('NaN')
+            df["Z"] = float('NaN')
+            df["elevation"] = float('NaN')
+            return df
         dfdif['Xdif'] = self.df_pos["X"]-pos_antena[0]
         dfdif['Ydif'] = self.df_pos["Y"]-pos_antena[1]
         dfdif['Zdif'] = self.df_pos["Z"]-pos_antena[2]
@@ -560,11 +1153,19 @@ class gnss:
         
         sin_phi = nv/norm
         self.df_pos["elevation"] = np.arcsin(sin_phi)
-        return pd.merge(df,self.df_pos,how='left',on=['sv','time']) 
+        #print ("In getElevation")
+        #print (self.df_pos)
+        #print (self.df_pos[self.df_pos["sv"]=="G02"])
+        #print (df[df["sv"]=="G02"])
+        dff = df.merge(self.df_pos,how='left',on=['sv','time']) 
+        #print (dff[dff["sv"]=="G02"])
+        #sys.exit()
+        return df.merge(self.df_pos,how='left',on=['sv','time']) 
 
 
-    def getPiercingPoint(self,df,pos_antena,h=400000):
+    def getPiercingPoint(self,df,pos_antena,h=350000):
         R_I = R_E + h
+        R_I = R_E + 400000
         df_inter = pd.DataFrame()
 
         #### Calculation of the position of the intersection of Satellite-Antena line with ionosphere which is a second degree equation
@@ -613,24 +1214,26 @@ def getBias_fromfile(sat,f_bias):
     return 0.0
 '''
 
-def getBias_fromfile(sat,file):
+def getBias_fromfile(sat,file,chanel1, chanel2):
     fbias = open(file,'r')
-    if sat[0]=="G":
-        for line in fbias.readlines():
-            splt_line = line.split()
-            if splt_line[0] == "DSB":
-                if splt_line[2]==sat:
-                    if splt_line[3]=="C1W":
-                        if splt_line[4]=="C2W":
-                            return float(splt_line[8])
-    if sat[0]=="R":
-        for line in fbias.readlines():
-            splt_line = line.split()
-            if splt_line[0] == "DSB":
-                if splt_line[2]==sat:
-                    if splt_line[3]=="C1P":
-                        if splt_line[4]=="C2P":
-                            return float(splt_line[8])
+    #if sat[0]=="G":
+    for line in fbias.readlines():
+        splt_line = line.split()
+        if splt_line[0] == "DSB":
+            if splt_line[2]==sat:
+                if splt_line[3]==chanel1:
+                    if splt_line[4]==chanel2:
+                        #print (sat,chanel1,chanel2,splt_line[8])
+                        return float(splt_line[8])
+    
+    #if sat[0]=="R":
+    #    for line in fbias.readlines():
+    #        splt_line = line.split()
+    #        if splt_line[0] == "DSB":
+    #            if splt_line[2]==sat:
+    #                if splt_line[3]=="C1P":
+    #                    if splt_line[4]=="C2P":
+    #                        return float(splt_line[8])
     return float('NaN')
 
 '''
@@ -688,7 +1291,7 @@ def get_arcs(elevations,t_begin=None,t_end=None):
                 arc["tmax"]=index[1]
                 arc["imax"]=0
 
-        if i-t_begin<datetime.timedelta(minutes=5) and v<15.0*math.pi/180: arc["full"]=False
+        if (i-t_begin).seconds<300 and v<15.0*math.pi/180: arc["full"]=False
         else: arc["full"]=True
         is_in_arc = True
 
