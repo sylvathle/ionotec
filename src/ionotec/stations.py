@@ -24,7 +24,7 @@
 #
 #############################################################################3
 
-import georinex as gr
+#import georinex as gr
 import pandas as pd
 import numpy as np
 
@@ -35,6 +35,8 @@ from os.path import isfile, join
 
 import sys
 
+from . import rinex
+
 #import os
 #root_dir = os.environ.get('PYTEC_PATH')
 
@@ -43,7 +45,7 @@ from pathlib import Path
 base_dir = Path(sys.argv[0]).resolve().parent
 target_dir = base_dir / "output/"
 target_dir.mkdir(parents=True, exist_ok=True)
-print ("Output directory:",target_dir)
+print ("Output directory is :",target_dir)
 root_dir = str(target_dir)+"/"
 
 #print ("root_dir", root_dir)
@@ -78,8 +80,10 @@ def resume_station(folder):
     search_dir = Path(folder)
     files_o = [f for f in search_dir.rglob("*o") if f.is_file()]
     files_d = [f for f in search_dir.rglob("*d") if f.is_file()]
+    files_crx = [f for f in search_dir.rglob("*crx") if f.is_file()]
+    files_rnx = [f for f in search_dir.rglob("*rnx") if f.is_file()]
 
-    files = files_o+files_d
+    files = files_o+files_d+files_crx+files_rnx
     
     d = {"station":[],"X":[],"Y":[],"Z":[],"resolution(s)":[]}
     for f in files:
@@ -87,16 +91,24 @@ def resume_station(folder):
         f_path = f.resolve()
         #print (f.replace(folder,""))
         #continue
-        if fname[-1]!="o": continue
-        station = fname[:4]
-        #print (fname,station)
-        if station in d["station"]: continue
+        #if fname[-1]!="o": continue
 
-        try: header = gr.rinexheader(f_path)
+
+        #try: header = gr.rinexheader(f_path)
+        try: 
+            rx = rinex.rinex(f_path) 
+            header = rx.read_header()
         except ValueError:
             print ("Error in file",f_path)
         if "INTERVAL" in header.keys(): interval = float(header["INTERVAL"].replace(" ",""))
         else: interval = 1.0
+        
+        if header['type']!='O': continue
+
+        station = header['name_station']
+        #print (fname,station)
+        if station in d["station"]: continue
+        
         pos_antena = header['position']
         d["station"].append(station)
         d["X"].append(pos_antena[0])
