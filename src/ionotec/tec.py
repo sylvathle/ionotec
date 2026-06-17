@@ -549,10 +549,11 @@ class tec:
             
         ### GLONASS
         if 'R' in self.list_df.keys():
-
             const = 'R'
             list_sv = self.list_df['R']['sv'].unique().tolist()
-            if len(list_sv)==0: return   
+            if len(list_sv)==0: 
+                del self.list_df[const]
+                return   
 
             list_cols = self.list_df[const].columns
 
@@ -597,8 +598,8 @@ class tec:
                 self.channels[const].append(chan)
                 
                 self.list_df[const].set_index("time",inplace=True)
-                self.t_min[const] = min(self.list_df[const].index)
-                self.t_max[const] = max(self.list_df[const].index)      
+                #self.t_min[const] = min(self.list_df[const].index)
+                #self.t_max[const] = max(self.list_df[const].index)      
     
                 df_glonass = pd.DataFrame()
                 for sv in list_sv:
@@ -611,12 +612,15 @@ class tec:
                 self.list_df[const] = df_glonass.dropna(subset=[C1,C2,L1,L2])
                 self.list_df[const]["lambda1"] = csts.c/self.list_df[const]["f1"]
                 self.list_df[const]["lambda2"] = csts.c/self.list_df[const]["f2"]
+
        
                 self.list_df[const]["STEC_p"] = (self.list_df[const][C2] - self.list_df[const][C1])*self.list_df[const]["alpha"]/1e16
                 self.list_df[const]["STEC_l"] = (self.list_df[const]["lambda1"]*self.list_df[const][L1] - \
                                                self.list_df[const]["lambda2"]*self.list_df[const][L2])*self.list_df[const]["alpha"]/1e16
+
                 
                 self.list_df[const].dropna(subset=["STEC_p","STEC_l"],inplace=True)
+
                 
                 if len(self.list_df[const])!=0:
                     self.list_df[const]["C1"] = chan["C1"]
@@ -624,6 +628,9 @@ class tec:
                     self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
                     self.t_min[const] = min(self.list_df[const].index)
                     self.t_max[const] = max(self.list_df[const].index)
+                else: 
+                    del self.list_df[const]
+                    del self.channels[const]
             else: del self.list_df[const]
  
         ## GALILEO
@@ -857,12 +864,12 @@ class tec:
         const_without_pos = []
         
         for const in self.list_df.keys():
-
             self.gnss.load_sats(const,self.t_min[const],self.t_max[const])            
             self.list_df[const] = self.gnss.getElevation(self.list_df[const],self.coord)
             self.list_df[const].dropna(subset="elevation",inplace=True)
             self.list_df[const] = self.gnss.getPiercingPoint(self.list_df[const],self.coord,self.h)            
             self.list_df[const].dropna(subset="elevation",inplace=True)
+
             self.list_df[const] = self.list_df[const][["sv","C1","C2","elevation","lat","lon","alt","STEC_l","STEC_p"]]
                         
         for const in const_without_pos:
@@ -1354,8 +1361,6 @@ class tec:
             self.br['time_i'].append(min(df.index))
             self.br['time_f'].append(max(df.index))
             self.br['constellation'].append(const)
-            #self.br['C1'].append(channel["C1"])
-            #self.br['C2'].append(channel["C2"])
             self.br['br'].append(br)
 
             df_br_station = pd.DataFrame(self.br)
