@@ -92,20 +92,12 @@ def fit_lin(t,sig):
 def tleft(border):
     return border["t_left"]
 
-#def filter_overlap_leap(list_borders,series):
-#    return list_borders
 
 def filter_slope_leap(list_borders,series,diffs):
     list_borders.sort(key=tleft)
-    #print (list_borders)
-    #print (series)
-    #print (diffs)
     #return list_borders
     for i in range(len(list_borders)-1):
         if list_borders[i+1]["left"]<=list_borders[i]["right"]:
-            #print ("------")
-            #print (list_borders[i])
-            #print (list_borders[i+1])
             list_borders[i+1]["left"]=list_borders[i]["right"]+1
             list_borders[i+1]["t_left"]=series.index[list_borders[i]["right"]+1]
     i=0
@@ -172,6 +164,7 @@ def plot_leap(diffs,series,s,A,B,N,borders,title=""):
     plt.show()
     plt.close()
 
+
 def process_br(df,h):
    
     # Coefficients of the quadratic error function that will be computed
@@ -185,11 +178,12 @@ def process_br(df,h):
 
     # Create list of time of the station removing duplicates
     time_series = df.groupby(level="time").size()
-    time_series = time_series.index
+    time_series = df.index
 
-    #print (len(time_series))
+
     # Compute sums
     for t in time_series:
+    #for t in df.index:
         sum_ci = 0 # sum of cos\chi_i for a coefficient (to be squared)
         sum_ci2 = 0 # sum of squared of cos\chi_i for a and b coefficient
         sum_sici = 0 # sum of STEC_i*cos\chi_i for b coefficient
@@ -220,8 +214,6 @@ def process_br(df,h):
     br = b/a
     return br
 
-
-
 from pathlib import Path
 
 
@@ -234,10 +226,6 @@ class tec:
     gps_alpha = gps_f1**2*gps_f2**2/(gps_f1**2-gps_f2**2)/40.318
 
     channels = {}
-    
-    # List of possible indices in observation RINEX files, P1 not available
-    #full_vars_list = ['P1','P2','C1','C2','L1','L2','S1','S2']
-    #full_vars_list = ['P2','P1','C2','C1','L1','L2']
 
     is_gnss_processed = False
 
@@ -295,12 +283,10 @@ class tec:
 
         # Bias of the antenna, calculated by method "compute_reveiver_bias"
         # Value stored in csv "stations.csv"
-        self.br = {'station':[],'constellation':[],'time_i':[],'time_f':[],'C1':[],'C2':[],'br':[]}
+        self.br = {'station':[],'constellation':[],'time_i':[],'time_f':[],'br':[]}
         
         if not os.path.exists(st.root_dir + "TEC/"):
-            os.mkdir(st.root_dir + "TEC/")
-            #except OSError as e:
-            #    if e.errno!=17: print ("FAIL creation of directory "+st.root_dir + "TEC/", e )2
+            os.mkdir(st.root_dir + "TEC/", exist_ok=True)
         
         self.datemin = date_min
         self.datemax = date_max
@@ -311,7 +297,6 @@ class tec:
 
         self.load_sat_DCB()
         self.sat_dcb.reset_index(inplace=True)
-        #sys.exit()
 
     ''' Function that prepare the obs, nav and bias list '''
     def prepare_files(self):
@@ -327,7 +312,6 @@ class tec:
             end_ext = ''.join([char for char in ext if not char.isdigit()])
 
             if ext=="crx":
-                print (file)
                 year = int(file.name[-26:-22])
                 doy = int(file.name[-22:-19])
             elif ext=="rnx":
@@ -338,8 +322,8 @@ class tec:
                 doy = int(file.name[-8:-5])
         
             if end_ext in self.obs_extension:
-                #rx_file = rx.rinex(str(file))
                 date = datetime.datetime(year, 1, 1, 0, 0, 0, 0) + datetime.timedelta(days=doy - 1)
+
                 if self.datemin is not None:
                     if (date < self.datemin): continue
                 if self.datemax is not None:
@@ -348,15 +332,19 @@ class tec:
                 if station not in self.list_obs_stations:
                     self.list_obs_stations.append(station)
 
+                
+
                 if not station in list_day_f_obs.keys(): 
                     list_day_f_obs[station] = {date:[file]}
                     #self.dict_f_obs[station] = [file]
                 else: 
-                    list_day_f_obs[station][date].append(file)# = {"day":date,"files":[]}
+                    if not date in list_day_f_obs[station].keys():
+                        list_day_f_obs[station][date] = [file]
+                    else:
+                        list_day_f_obs[station][date].append(file)# = {"day":date,"files":[]}
+                        
                     
             if end_ext in self.nav_extension:
-                #rx_file = rx.rinex(str(file))
-                #station = file.name[:4].lower()
                 date = datetime.datetime(year, 1, 1, 0, 0, 0, 0) + datetime.timedelta(days=doy - 1)
                 if self.datemin is not None:
                     if (date < self.datemin): continue
@@ -383,6 +371,7 @@ class tec:
                         if year>self.datemax.year: continue
                         if year==self.datemax.year and month>self.datemax.month: continue                
                 self.list_f_dcb.append(str(file))
+
 
         for station in list_day_f_obs.keys():
             self.dict_f_obs[station] = []
@@ -492,7 +481,9 @@ class tec:
         
         list_f_obs = self.dict_f_obs[station]
 
+
         for f_obs in list_f_obs:
+            print (f_obs)
             try:
                 rfile = rx.rinex(f_obs)
                 header = rfile.read_header()
@@ -507,18 +498,18 @@ class tec:
             #    continue
         
             for const, df in list_df_f_obs.items():
+                #if const not in ['G']: continue
                 if const in self.list_df.keys():
                     self.list_df[const] = pd.concat([self.list_df[const],df])
                 else:
                     self.list_df[const] = df.copy()
 
-        const_to_del = []
-        for k in self.list_df.keys():
-            if k=="C": continue
-            const_to_del.append(k)
-        for const in const_to_del:
-            del self.list_df[const]
-                      
+        #const_to_del = []
+        #for k in self.list_df.keys():
+        #    if k=="S": continue
+        #    const_to_del.append(k)
+        #for const in const_to_del:
+        #    del self.list_df[const]
         
         ### GPS
         if 'G' in self.list_df.keys():
@@ -644,9 +635,6 @@ class tec:
             
             C1, C2 = '', ''
             L1, L2 = '', ''
-            #chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
-            #self.channels['E'] = []
-            #self.channels['E'].append(chan)
             chan = {}
             for c in ['C','X','A','B','Z']:
                 varc1 = 'C1'+c
@@ -695,6 +683,7 @@ class tec:
         #### Beidu
     
         if "C" in self.list_df.keys():
+            const = 'C'
             bds_f1 = 1561.098 * 1e6
             bds_f2 = 1207.14 * 1e6
             bds_f3 = 1268.52 * 1e6
@@ -706,11 +695,11 @@ class tec:
             beidu_columns = self.list_df["C"].columns
             beidu_alpha_1 = (bds_f1**2*bds_f2**2/(bds_f1**2-bds_f2**2)/40.318)/1e16
             beidu_alpha_2 = (bds_f1**2*bds_f3**2/(bds_f1**2-bds_f3**2)/40.318)/1e16
+            beidu_alpha_3 = (bds_f2**2*bds_f3**2/(bds_f2**2-bds_f3**2)/40.318)/1e16
             list_cols = ['time','sv']
             
             
-            self.channels['C'] = []
-            
+            self.channels[const] = []
             
             df_beidu_2_6 = pd.DataFrame()
             df_beidu_2_7 = pd.DataFrame()
@@ -741,96 +730,98 @@ class tec:
                 df_beidu_2_6.dropna(subset="STEC_l",inplace=True)
                 if len(df_beidu_2_6)!=0: 
                     self.channels[const].append(chan)
-                
-                #C1,C2 = 'C2I','C6I'
-                #L1,L2 = 'L2I','L6I'
-                #str_stec_p = 'STEC_p'+'_'+C1+'_'+C2
-                #str_stec_l = 'STEC_l'+'_'+L1+'_'+L2
-                #chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
-                #self.channels['C'].append(chan)
-                ##self.br['C_'+L1+'_'+L2] = []
-                #self.list_df["C"][str_stec_l] = (self.list_df["C"][L1]*bds_lambda1-self.list_df["C"][L2]*bds_lambda3)*beidu_alpha_2
-                #self.list_df["C"][str_stec_p] = (self.list_df["C"][C2]-self.list_df["C"][C1])*beidu_alpha_2
-                #list_cols.append(str_stec_l)
-                #list_cols.append(str_stec_p)
 
-            #sys.exit()
-            
             self.list_df[const] = pd.DataFrame()
             if len(df_beidu_2_6)!=0: self.list_df[const] = pd.concat([self.list_df[const],df_beidu_2_6])
             if len(df_beidu_2_7)!=0: self.list_df[const] = pd.concat([self.list_df[const],df_beidu_2_7])
-                
-            #self.list_df['C'] = self.list_df['C'][list_cols]
-            self.list_df[const].set_index("time",inplace=True)
-            self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
-            self.list_df[const].dropna(subset="STEC_l",inplace=True)
+
+
+            if len(self.list_df[const])!=0:
+                self.list_df[const].set_index("time",inplace=True)
+                self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
+                self.list_df[const].dropna(subset="STEC_l",inplace=True)
             
-            self.t_min[const] = min(self.list_df[const].index)
-            self.t_max[const] = max(self.list_df[const].index)
-
-            #print (self.list_df['C'][self.list_df['C']["sv"]=="C02"])
-
+                self.t_min[const] = min(self.list_df[const].index)
+                self.t_max[const] = max(self.list_df[const].index)
+            else:
+                del self.list_df[const]
         #### QZSS
         if "J" in self.list_df.keys():
-            self.list_df['J'] = self.list_df['J'].dropna(axis=1, how='all')
+            const = 'J'
+            
+            self.list_df[const] = self.list_df[const].dropna(axis=1, how='all')
 
             C1, C2, L1, L2 = '', '', '', ''
             for c in ['C','X','S','L','Z']:
                 varc1 = 'C1'+c
-                if varc1 in self.list_df['J'].columns:
+                if varc1 in self.list_df[const].columns:
                     C1 = varc1
                     break
             for c in ['Q','X','I']:
                 varc2 = 'C5'+c
-                if varc2 in self.list_df['J'].columns:
+                if varc2 in self.list_df[const].columns:
                     C2 = varc2
                     break
             for c in ['C','X','S','L','Z']:
                 varc1 = 'L1'+c
-                if varc1 in self.list_df['J'].columns:
+                if varc1 in self.list_df[const].columns:
                     L1 = varc1
                     break
             for c in ['Q','X','I']:
                 varc2 = 'L5'+c
-                if varc2 in self.list_df['J'].columns:
+                if varc2 in self.list_df[const].columns:
                     L2 = varc2
                     break
+            if (C1!='') and (C2!='') and (L1!='') and (L2!=''): 
+                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
                     
             chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
-            self.channels['J'] = []
-            self.channels['J'].append(chan)
-            
-            if (C1=='') and (C2=='') and (L1=='') and (L2==''): 
-                del self.list_df['J']
-            else:
-                str_stec_p = 'STEC_p'+'_'+C1+'_'+C2
-                str_stec_l = 'STEC_l'+'_'+L1+'_'+L2
-                #self.br['J_'+L1+'_'+L2] = []
+
+            if chan:
+                self.channels[const] = []
+                self.channels[const].append(chan)
                 
                 qzss_alpha = self.gps_f1**2*self.gps_f5**2/(self.gps_f1**2-self.gps_f5**2)/40.318
-                self.list_df['J'][str_stec_l] = (self.list_df['J'][L1]*self.gps_lambda1-self.list_df['J'][L2]*self.gps_lambda5)*qzss_alpha/1e16
-                self.list_df['J'][str_stec_p] = (self.list_df['J'][C2]-self.list_df['J'][C1])*qzss_alpha/1e16
-                self.list_df['J'] = self.list_df['J'][["time","sv",str_stec_l,str_stec_p]]
-                self.list_df['J'].dropna(subset=[str_stec_l,str_stec_p],inplace=True)
-                self.list_df['J'].set_index("time",inplace=True)
-                self.t_min['J'] = min(self.list_df['J'].index)
-                self.t_max['J'] = max(self.list_df['J'].index)
+                self.list_df[const].set_index("time",inplace=True)
+                self.list_df[const]["STEC_l"] = (self.list_df[const][L1]*self.gps_lambda1-self.list_df[const][L2]*self.gps_lambda5)*qzss_alpha/1e16
+                self.list_df[const]["STEC_p"] = (self.list_df[const][C2]-self.list_df[const][C1])*qzss_alpha/1e16
+                self.list_df[const]["C1"] = chan["C1"]
+                self.list_df[const]["C2"] = chan["C2"]
+                self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
+
+                self.t_min[const] = min(self.list_df[const].index)
+                self.t_max[const] = max(self.list_df[const].index)
+
+            else:
+                del self.list_df[const]
+
+
 
         if "S" in self.list_df.keys():
+
+            const = "S"
             C1, C2, L1, L2 = 'C1C', 'C5I', 'L1C', 'L5I'
-            str_stec_p = 'STEC_p'+'_'+C1+'_'+C2
-            str_stec_l = 'STEC_l'+'_'+L1+'_'+L2
+
             chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
-            self.channels['S'] = []
-            self.channels['S'].append(chan)
-            sbas_alpha = self.gps_f1**2*self.gps_f5**2/(self.gps_f1**2-self.gps_f5**2)/40.318
-            self.list_df['S'][str_stec_l] = (self.list_df['S'][L1]*self.gps_lambda1-self.list_df['S'][L2]*self.gps_lambda5)*sbas_alpha/1e16
-            self.list_df['S'][str_stec_p] = (self.list_df['S'][C2]-self.list_df['S'][C1])*sbas_alpha/1e16
-            self.list_df['S'] = self.list_df['S'][["time","sv",str_stec_l,str_stec_p]]
-            self.list_df['S'].dropna(subset=[str_stec_l,str_stec_p],inplace=True)
-            self.list_df['S'].set_index("time",inplace=True)
-            self.t_min['S'] = min(self.list_df['S'].index)
-            self.t_max['S'] = max(self.list_df['S'].index)
+
+            if chan:
+
+                self.channels[const] = []
+                self.channels[const].append(chan)
+                self.list_df[const].set_index("time",inplace=True)
+                self.t_min[const] = min(self.list_df[const].index)
+                self.t_max[const] = max(self.list_df[const].index)        
+
+                sbas_alpha = self.gps_f1**2*self.gps_f5**2/(self.gps_f1**2-self.gps_f5**2)/40.318
+                self.list_df[const]['STEC_l'] = (self.list_df[const][L1]*self.gps_lambda1-self.list_df[const][L2]*self.gps_lambda5)*sbas_alpha/1e16
+                self.list_df[const]['STEC_p'] = (self.list_df[const][C2]-self.list_df[const][C1])*sbas_alpha/1e16
+    
+                self.list_df[const]["C1"] = chan["C1"]
+                self.list_df[const]["C2"] = chan["C2"]
+                
+                self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
+
+            else: del self.list_df[const]
 
         # List satellites seen by the station and prepare dict of list_borders
         const_to_del = []
@@ -839,8 +830,6 @@ class tec:
             if len(self.list_df[const])==0:
                 const_to_del.append(const)
                 continue
-            #self.list_df[const] = self.list_df[const].groupby("sv").resample("60s").mean()
-            #self.list_df[const].reset_index(level=["sv"],inplace=True)
 
             for s in self.list_df[const]["sv"].values:
                 if s not in self.sv:
@@ -874,8 +863,6 @@ class tec:
             self.list_df[const].dropna(subset="elevation",inplace=True)
             self.list_df[const] = self.gnss.getPiercingPoint(self.list_df[const],self.coord,self.h)            
             self.list_df[const].dropna(subset="elevation",inplace=True)
-            print (const)
-            print (self.list_df[const].columns)
             self.list_df[const] = self.list_df[const][["sv","C1","C2","elevation","lat","lon","alt","STEC_l","STEC_p"]]
                         
         for const in const_without_pos:
@@ -1108,57 +1095,25 @@ class tec:
             df_filtered = pd.DataFrame()
 
             list_sv = df_data["sv"].unique().tolist()
-            #list_stec_l = [c for c in df_data.columns if "STEC_l" in c]
-            #list_stec_p = [c for c in df_data.columns if "STEC_p" in c]
-            #channels_p =  {}
-            #for stec_p in list_stec_p:
-            #    split_stec_p = stec_p.split("_")
-            #    p1 = split_stec_p[-2]
-            #    p2 = split_stec_p[-1]
-            #    channels_p[stec_p] = [p1,p2]
 
             for sat in list_sv:
 
                 df_sat = df_data[df_data["sv"]==sat]
                 df_sat_filter = pd.DataFrame()
 
-                #if sat!="C02": continue
-
-                #print (df_sat)
-
                 for channel in self.channels[const]:
 
-                    #print (sat,channel)
                     
                     chan_filter = (df_sat["C1"]==channel["C1"]) & (df_sat["C2"]==channel["C2"])
                     df_sat_chanel = df_sat[chan_filter]
 
-
-                #sys.exit()
-                
-                #for i_chanel in range(len(list_stec_l)):
-                                   
-                    #stec_l = list_stec_l[i_chanel]
-                    #stec_p = list_stec_p[i_chanel]
-
-                    
-                    #chanel1 = channels_p[stec_p][0]
-                    #chanel2 = channels_p[stec_p][1]
-                    #df_sat_chanel = df_sat[["sv","lat","lon","elevation",'X','Y','Z',stec_l,stec_p]]
-                    #df_sat_chanel = df_sat.copy()#[["sv","lat","lon","elevation",'X','Y','Z',stec_l,stec_p]]
-
-                    
-                    if len(df_sat_chanel)==0: continue
+                        
                     if len(df_sat_chanel["STEC_l"].dropna())==0: continue
+                    
 
                     # Make list of arcs of satellite using elevation information
                     elevations = df_sat_chanel["elevation"]
                     list_arcs = gnss.get_arcs(elevations,t_begin,t_end)
-
-                    # Get satellite bias and correct STEC_sl with it
-                    #df_sat_chanel = self.add_sat_DCB(df_sat_chanel)
-                    #sys.exit()
-                    #sat_bias = gnss.getBias_fromfile(sat,self.f_sat_bias,chanel1,chanel2) * self.getAlpha(sat,chanel1,chanel2) * csts.c * 1e-9  / 1e16
 
                     # Squared of sin of elevation for baseline (Brs) pondering
                     df_sat_chanel["sin2_ele"] = np.sin(df_sat_chanel['elevation'])**2
@@ -1171,9 +1126,6 @@ class tec:
                     n_arc=0
 
                     df_arcs = pd.DataFrame()
-                    #print ("Before arc")
-                    #print (df_sat_chanel)
-                    # Run over each arc
                     for arc in list_arcs:
                       
                         # Must gets borders that are inside the arc segment
@@ -1184,10 +1136,6 @@ class tec:
                         date_filter = (df_sat_chanel.index>=arc["start"]) & (df_sat_chanel.index<=arc["end"])
                         df_arc = df_sat_chanel[date_filter]
 
-                        
-                        
-
-                        #df_arc = df_sat_chanel.loc[arc["start"]:arc["end"]]
                         if len(df_arc)<=8:continue                   
                         arc_borders = self.list_leaps(df_arc)
 
@@ -1197,7 +1145,6 @@ class tec:
         
                         # Eliminate segments with too low elevation satellites
                         list_max_ele = []
-                        #for i,b in enumerate(arc_borders):
                         i=0
                         while i<len(arc_borders):
                             t_dist=(arc_borders[i]["t_right"]-arc_borders[i]["t_left"]).seconds
@@ -1226,7 +1173,6 @@ class tec:
                                 date_border_filter  = (df_arc.index>=arc_borders[i]["t_left"]) & (df_arc.index<=arc_borders[i]["t_right"])
                                 df_seg = df_arc[date_border_filter]
 
-                                #df_seg = df_arc.loc[b["t_left"]:b["t_right"]]
                                 df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
 
 
@@ -1246,11 +1192,9 @@ class tec:
                             date_border_filter  = (df_arc.index>=arc_borders[i]["t_left"]) & (df_arc.index<=arc_borders[i]["t_right"])
                             df_seg = df_arc[date_border_filter]
 
-                            #df_seg = df_arc.loc[arc_borders[i]["t_left"]:arc_borders[i]["t_right"]]
                             t_dist=(arc_borders[i+1]["t_left"]-arc_borders[i]["t_right"]).seconds
                             slope = (arc_borders[i+1]["left_A"]+arc_borders[i]["right_A"])/2
         
-                            #df_filter_arc = df_arc.loc[arc_borders[i]["t_left"]:arc_borders[i]["t_right"]]
                             glue=d_df_seg[i+1]["STEC_l"].iloc[0]-df_seg["STEC_l"].iloc[-1]-slope*t_dist
                             df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
                             brs=df_br['BRs'].sum(skipna=True)/df_br["sin2_ele"].sum(skipna=True)
@@ -1265,7 +1209,6 @@ class tec:
                             df_seg = None
                             date_border_filter  = (df_arc.index>=arc_borders[i]["t_left"]) & (df_arc.index<=arc_borders[i]["t_right"])
                             df_seg = df_arc[date_border_filter]
-                            #df_seg = df_arc.loc[arc_borders[i]["t_left"]:arc_borders[i]["t_right"]]
                             t_dist=(arc_borders[i]["t_left"]-arc_borders[i-1]["t_right"]).seconds
         
                             slope = arc_borders[i-1]["right_A"]
@@ -1281,7 +1224,6 @@ class tec:
                         # Look at intermediate segments
                         i = 0
                         if len(sane_indices)>=2:
-                        #if False:
                             for i,s in enumerate(sane_indices[0:len(sane_indices)-1]):
                                 ileft = s+1
                                 iright = sane_indices[i+1]-1
@@ -1339,23 +1281,10 @@ class tec:
                         df_filter_arc = pd.DataFrame()
                         for df in d_df_seg:
                             if df is None:continue
-                            df_filter_arc = pd.concat([df_filter_arc,df])
-
-
-
-
-                        #print (arc)
-                        #print (channel)
-                        #print (df_filter_arc)
-                        # Calculate VTEC (still not take into account receiver bias)
-                        #df_filter_arc["STEC_l"] = df_filter_arc["STEC_l"]+df_filter_arc["DCB"]
-                        #df_filter_arc["VTEC"]=df_filter_arc["STEC_l"]*df_filter_arc['cos_chi']
-                        #df_filter_arc=df_filter_arc[["sv","lat","lon","elevation","cos_chi",stec_l,stec_p,vtec]]
-                        
+                            df_filter_arc = pd.concat([df_filter_arc,df])                        
                         
                         
                         df_arcs = pd.concat([df_arcs,df_filter_arc])    
-
         
                     if len(df_arcs)==0: continue
                     if len(df_sat_filter)==0: df_sat_filter = df_arcs
@@ -1363,13 +1292,11 @@ class tec:
                         df_sat_filter["STEC_l"] = df_arcs["STEC_l"]
                         df_sat_filter["STEC_p"] = df_arcs["STEC_p"]
 
-                    print (channel)
                     df_sat_filter['C1'] = channel['C1']
                     df_sat_filter['C2'] = channel['C2']
-
-                    #print ("df_sat_filter")
-                    #print (df_sat_filter)    
+ 
                     df_filtered = pd.concat([df_filtered,df_sat_filter])
+
             
             if len(df_filtered)==0: continue
             self.list_df[const] = df_filtered
@@ -1382,38 +1309,26 @@ class tec:
             p1p2_mask = (self.list_df[const]['C1'] == 'P1') & (self.list_df[const]['C2'] == 'P2')
             self.list_df[const].loc[p1p2_mask, 'time_day'] = self.list_df[const].loc[p1p2_mask, 'time_day'].dt.to_period('M').dt.to_timestamp()
     
-    
-            #self.sat_dcb['time_day'] = self.sat_dcb.index.copy()
-            #p1p2_mask2 = (self.sat_dcb['C1'] == 'P1') & (self.sat_dcb['C2'] == 'P2')
-            #self.sat_dcb.loc[p1p2_mask2, 'time_day'] = self.sat_dcb.loc[p1p2_mask2, 'time_day'].dt.to_period('M').dt.to_timestamp()
-
             # Merge on daily time + sv + C1 + C2
             self.list_df[const] = self.list_df[const].merge(
                 self.sat_dcb[['time', 'sv', 'C1', 'C2', 'dcb']],
                 left_on=['time_day', 'sv', 'C1', 'C2'],
                 right_on=['time','sv', 'C1', 'C2'],
-                how='left',
+                how='inner',
                 suffixes=('', '_df2')
             )
+
+            if len(self.list_df[const])==0: continue 
+                
             
-            # Merge on time_day instead of time
-            #self.list_df[const] = self.list_df[const].merge(
-            #    self.sat_dcb[['time_day', 'sv', 'C1', 'C2', 'dcb']],
-            #    on=['time_day', 'sv', 'C1', 'C2'],
-            #    how='left',
-            #    suffixes=('', '_df2')
-            #)
-    
             # Restore original index and drop helper columns
             self.list_df[const] = self.list_df[const].set_index('time').drop(columns=['time_day', 'time_df2'])
-            #sys.exit()
-            
-            #self.list_df[const][]
-            self.list_df[const]["STEC_l"] += self.list_df[const]["dcb"]
-            self.list_df[const]["VTEC"]=self.list_df[const]["STEC_l"]*self.list_df[const]['cos_chi']
 
-        
-
+            if const!='S':
+                self.list_df[const]["STEC_l"] += self.list_df[const]["dcb"]
+                self.list_df[const]["VTEC"]=self.list_df[const]["STEC_l"]*self.list_df[const]['cos_chi']
+ 
+    
     def compute_receiver_bias(self,resolution=datetime.timedelta(days=1)):
         ''' Sylvain Blunier 06/2021 v1.0.0
                 Function that computes and returns the biais of some station.
@@ -1433,49 +1348,28 @@ class tec:
             #list_stec = [s for s in df.columns if 'STEC_l' in s]
             if len(df)==0: continue
 
-
-            for channel in self.channels[const]:
-
-                chan_filter = (df["C1"]==channel["C1"]) & (df["C2"]==channel["C2"])
-                df_sat_chanel = df[chan_filter]
-                print (const)
-                print (channel)
-                print (df_sat_chanel)
-                br = process_br(df_sat_chanel[["elevation",'STEC_l']],self.h)
-            
-                self.br['station'].append(self.station)
-                self.br['time_i'].append(min(df.index))
-                self.br['time_f'].append(max(df.index))
-                self.br['constellation'].append(const)
-                self.br['C1'].append(channel["C1"])
-                self.br['C2'].append(channel["C2"])
-                self.br['br'].append(br)
-
-                #print (self.station,const,channel["C1"],channel["C2"],br)
-                #self.list_df[const]["br"] = br
+            br = process_br(df[["elevation",'STEC_l']],self.h)
+        
+            self.br['station'].append(self.station)
+            self.br['time_i'].append(min(df.index))
+            self.br['time_f'].append(max(df.index))
+            self.br['constellation'].append(const)
+            #self.br['C1'].append(channel["C1"])
+            #self.br['C2'].append(channel["C2"])
+            self.br['br'].append(br)
 
             df_br_station = pd.DataFrame(self.br)
             
-            print (self.list_df[const][ (self.list_df[const]['sv']=="C02")])
+            
             self.list_df[const]['time_day'] = self.list_df[const].index.normalize()
             self.list_df[const].reset_index(inplace=True)   # 'time' becomes a column
 
+            self.list_df[const]['br'] = br
+            
             df_br_station['time_day'] = df_br_station['time_i'].dt.normalize()
             df_br_station_unique = df_br_station[df_br_station['station']==self.station]
             df_br_station_unique = df_br_station_unique[df_br_station_unique['constellation']==const]
 
-            print (df_br_station_unique)
-            # Merge on daily time + sv + C1 + C2
-            self.list_df[const] = self.list_df[const].merge(
-                df_br_station_unique[['time_day', 'C1', 'C2', 'br']],
-                on=['time_day', 'C1', 'C2'],
-                how='left'
-            )
-
-            # Restore original index and drop helper columns
-            self.list_df[const] = self.list_df[const].set_index('time').drop(columns=['time_day'])
-
-            print (self.list_df[const][ (self.list_df[const]['sv']=="C02")])
             
         self.df_br = pd.DataFrame(self.br)#.set_index("time_i")
         f_br = st.root_dir + "TEC/receiver_bias.csv"
@@ -1488,42 +1382,24 @@ class tec:
         self.df_br.to_csv(f_br)
         
 
-
-
-    def get_receiver_bias(self,sat,force_compute=False):
-        ''' Function that returns the bias of the station given in argument
-                If the information is not in stations.csv just return 0
-                    (with warning, receiver bias should not be ignored)
-            * Input: - station: string. station name
-                    - compute_if_nan: bool, False by default, if True, calls compute_receiver_bias
-            * Output: float. bias value in TECU
-        '''
-        receiver_bias = pd.read_csv(st.root_dir+"stations.csv").set_index("station")
-
-        if not self.station in receiver_bias.index:
-            print (f"WARNING must update stations.csv, with {station} not in csv, return br=0")
-            return 0
-
-        br = receiver_bias.loc[self.station]["br"]
-        if force_compute:
-            self.br = self.compute_receiver_bias()
-            return self.br
-        self.br=br
-        return br
-
     def add_receiver_bias(self):
-        #if len(self.df_obs)==0: return
         self.compute_receiver_bias()
         for const in self.list_df.keys():
 
-            #if const not in self.list_df.keys(): continue
+            if len(self.list_df[const])==0: continue 
 
-            if (len(self.list_df[const])==0): continue
-            
 
-            self.list_df[const]["VTEC"] = self.list_df[const]["STEC_l"]-self.list_df[const]["br"]
-            self.list_df[const]["VTEC"] *= np.cos(np.arcsin(R_E*np.cos(self.list_df[const]["elevation"])/(R_E+self.h)))
+            if const!="S":
+                self.list_df[const]["VTEC"] = self.list_df[const]["STEC_l"]-self.list_df[const]["br"]
+                self.list_df[const]["VTEC"] *= np.cos(np.arcsin(R_E*np.cos(self.list_df[const]["elevation"])/(R_E+self.h)))
 
+                self.list_df[const].reset_index(inplace=True)
+                self.list_df[const] = self.list_df[const][["time","sv","lat","lon","elevation","STEC_l","VTEC"]]
+            else:
+                self.list_df[const].reset_index(inplace=True)
+                self.list_df[const] = self.list_df[const][["time","sv","lat","lon","elevation","STEC_l"]]
+
+            self.list_df[const] = self.list_df[const].groupby(by=["time","sv"],as_index=False).mean()
 
         
 
@@ -1533,206 +1409,37 @@ class tec:
         else:
             self.sat_dcb = DCB.load_dcb(self.list_f_dcb)
             return
-
-            '''
-            dict_f_DCB = {"sv":[],"time":[],"chanel1":[],"chanel2":[],"DCB":[],"STD":[]}
-            
-            for f_bias in self.list_f_dcb:
-                fbias = open(f_bias,'r')
-                line = fbias.readline()
-                
-                ## Skip header
-                while line[1:4]!="DSB": line = fbias.readline()
-    
-                while (line[1:4]=="DSB") and (len(line[11:14].replace(" ",""))==3):
-    
-                    year, day_of_year, seconds = line[35:49].split(":")
-                    t_init = datetime.datetime(int(year), 1, 1) + datetime.timedelta(days=int(day_of_year) - 1, seconds=int(seconds))
-    
-                    sv = line[11:14]
-                    chanel1 = line[25:28]
-                    chanel2 = line[30:33]
-                    dict_f_DCB["time"].append(t_init)
-                    dict_f_DCB["sv"].append(sv)
-                    dict_f_DCB["chanel1"].append(chanel1)
-                    dict_f_DCB["chanel2"].append(chanel2)
-                    ns_to_tecu = freq.getAlpha(sv,chanel1,chanel2) * csts.c * 1e-9  / 1e16
-                    dict_f_DCB["DCB"].append(float(line[84:91])*ns_to_tecu)
-                    dict_f_DCB["STD"].append(float(line[97:103])*ns_to_tecu)
-                    line = fbias.readline()
-            #    
-            self.df_sat_DCB = pd.DataFrame(dict_f_DCB)
-            self.df_sat_DCB.set_index("time",inplace=True)
-            self.df_sat_DCB.dropna(subset="DCB",inplace=True)
-            '''
-
-    def add_sat_DCB(self,df_sat_chanel):
-
-
-        sys.exit()
-        list_channel_pair = []
-        for c in df_sat_chanel.columns:
-            if "STEC" in c:
-                csplit = c.split("_")
-                chanel1 = csplit[-2]
-                chanel2 = csplit[-1]
-                if chanel1[0]!="C": continue
-                if chanel2[0]!="C": continue
-                list_channel_pair.append([chanel1,chanel2])
-
-
-        var_rx2 = ["C1","P1","C2","P2"]
-        for pair in list_channel_pair:
-            chanel1 = pair[0]
-            chanel2 = pair[1]
-            if (chanel1 in var_rx2) or (chanel2 in var_rx2):
-                print (f"Get rx2 DCB for {chanel1} and {chanel2}")
-            else:
-                print (f"Get rx3 DCB for {chanel1} and {chanel2}")
-                
-
-        #sys.exit()
-        #sys.exit()
-        pairs = list(
-            df_sat_chanel.index.to_series()
-              .apply(lambda x: (x.year, x.month))
-              .unique()
-        )
         
-        self.df_sat_DCB = pd.DataFrame()
-        for p in pairs:
-            y = p[0]
-            m = p[1]            
-            df_dcb = DCB.read_p1p2_dcb(datetime.datetime(y,m,1,0,0,0,0))
-            self.df_sat_DCB = pd.concat([self.df_sat_DCB,df_dcb])
-        self.df_sat_DCB.set_index("time",inplace=True)
-
-        # Round df1's index to day level for merging
-        df1_merge = df_sat_chanel.copy()
-        df1_merge["date_day"] = df1_merge.index.to_period('M').to_timestamp()
-
-        
-        # df2 index is already day-rounded, extract it as a column
-        self.df_sat_DCB["date_day"] = self.df_sat_DCB.index #.normalize()
-        # Merge on day + sv
-        df_sat_chanel = df1_merge.reset_index().merge(
-            self.df_sat_DCB[["date_day", "sv", "DCB"]],
-            on=["date_day", "sv"],
-            how="left"
-        ).set_index(df_sat_chanel.index.name or "index").drop(columns="date_day")
-
-        return (df_sat_chanel)
-        
-        
-    '''
-    def add_sat_DCB(self,df_sat_chanel):
-
-        # Extract channel names from the STEC column name
-        stec_col = [col for col in df_sat_chanel.columns if col.startswith("STEC_p_")][0]
-        _, _, ch1, ch2 = stec_col.split("_")  # e.g. "STEC_p_C1C_C2W" → ch1="C1C", ch2="C2W"
-        
-        # Filter df2 to only rows matching these channels
-        df2_filtered = self.df_sat_DCB[(self.df_sat_DCB["chanel1"] == ch1) & (self.df_sat_DCB["chanel2"] == ch2)].copy()
-        
-        # Round df1's index to day level for merging
-        df1_merge = df_sat_chanel.copy()
-        df1_merge["date_day"] = df1_merge.index.normalize()
-        
-        # df2 index is already day-rounded, extract it as a column
-        #df2_filtered = df2_filtered.copy()
-        df2_filtered["date_day"] = df2_filtered.index #.normalize()
-        
-        # Merge on day + sv
-        df_sat_chanel = df1_merge.reset_index().merge(
-            df2_filtered[["date_day", "sv", "DCB"]],
-            on=["date_day", "sv"],
-            how="left"
-        ).set_index(df_sat_chanel.index.name or "index").drop(columns="date_day")
-
-        return (df_sat_chanel)
-    '''
-
 
     def to_feather(self):
 
         df_obs = pd.DataFrame()
 
-        for const, channels in self.channels.items():
-            if const not in self.list_df.keys(): continue
-            vtec_channels = []
-            stec_channels = []
-            df_const = pd.DataFrame()
-            list_columns = ["sv","lat","lon","elevation","DCB"]
-            for chan in channels:
-                list_columns.append("VTEC_"+chan["L1"]+"_"+chan["L2"])
-                list_columns.append("STEC_l_"+chan["L1"]+"_"+chan["L2"])
-                list_columns.append("br_"+chan["L1"]+"_"+chan["L2"])
-                vtec_channels.append("VTEC_"+chan["L1"]+"_"+chan["L2"])
-                stec_channels.append("STEC_l_"+chan["L1"]+"_"+chan["L2"])
-            df_obs = pd.concat([df_obs,self.list_df[const]])
+        for const in self.list_df.keys():
+            df_obs = pd.concat([
+                df_obs,
+                self.list_df[const]#[["time","sv","lat","lon","elevation","STEC_l","VTEC"]]
+            ])
             
-
-        #dfs_by_year = {
-        #    year: group
-        #    for year, group in df_obs.groupby(df_obs.index.year)
-        #}
 
         feather_path = st.root_dir + "TEC/" + self.station
         df_obs.to_csv(feather_path+".csv")
         
-        #for year,df in dfs_by_year.items():
-
-            #feather_path = st.root_dir + "TEC/" + self.station
-            #if not os.path.exists(st.root_dir + "TEC/"+ str(year)):
-            #    try: os.mkdir(st.root_dir + "TEC/"+ str(year))
-            #    except OSError as e:
-            #            if e.errno!=17: print ("FAIL creation of directory "+st.root_dir + "TEC/"+ str(year), e )
-                #else: print ("Successfully created the directory "+st.root_dir + "TEC/"+ str(self.year))
-
-            ##df.set_index("station",inplace=True)
-            #if os.path.exists(f_br):
-            #    df_br_stored = pd.read_csv(f_br).set_index("station")
-            #    df_br_stored = df_br_stored[df_br_stored.index!=self.station]
-            #    df_br_stored = pd.concat([df_br_stored,df])
-            #    df_br_stored.to_csv(f_br)
-            #else:
-                #df_br = pd.DataFrame(self.br).set_index("station")
-            #df.to_csv(feather_path+".csv")
-
-            
-            #self.list_df[const].to_csv(const+".csv")
     
     def compute_vtec(self,station):	
 
-        
-
-        #sys.exit()
-        #print ("rinex_to_stec")
         self.list_df = {}
         self.channels = {}
+     
+        self.rinex_to_stec(station)
         
-
-        if not self.rinex_to_stec(station): 
-            return
-        #print (self.list_df['G'])
-
-        #sys.exit()
-
-        #print ("Calculating satellite position from navigation rinex")
         self.add_satellite_pos()
-
         
         print ("Calculating baseline to correct Slant TEC")
         self.add_baseline()
-        print (self.list_df['C'][self.list_df['C']['sv']=="C02"])
-
 
         print ("Calculating receiver bias, correct Slant TEC, compute VTEC")
         self.add_receiver_bias()
-
-        self.list_df['C'].to_csv("testBDS.csv")
-        sys.exit()
-        #print (self.list_df['C'][self.list_df['C']['sv']=="C02"])
         
         #self.to_feather(st.root_dir + "TEC/" + str(self.year) + "/" + self.station + ".feather" )
         self.to_feather()

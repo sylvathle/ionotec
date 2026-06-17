@@ -1,5 +1,3 @@
-- file name of the feather exported is sometimes more than the 4 digits of the station name, should be revised.
-- Put "try, Execpt" when loading files with georinex (nav and obs)
-- ionotec no working properly with compact observation files conflicting reading of ".YYd" naming format with ".YYo"
-- Graph: make the map on plot_station tailored to the station location (not latin America hard coded)
-- WARNING:root:duplicate times detected, skipping SV G29
+- There are some losses in Beidu when the channels do not end with "I", no DCB is directly provided, by maybe this can be worked around to save these stations
+but
+- QZSS has very few satellites which makes in general impossible to determine the receiver DCB, this can be worked around using the other constellation as reference.

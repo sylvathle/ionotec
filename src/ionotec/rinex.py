@@ -49,6 +49,12 @@ def process_head_data_line(line):
         
     return d,nsat,list_sats
 
+def getVal(strVal):
+    #float(self.line[il:il+19].replace("D","E"))
+    str_  = strVal.replace(" ","").replace("D","E").replace("\n","")
+    try: return float(str_)
+    except: return float('NaN')
+
 def process_head_data_line_rinexv2(line):
 
     spline = line.split()
@@ -244,10 +250,8 @@ class rinex:
 
     def read_data(self):
 
-        #print (self.header)
         if int(self.header["version"])==2:
             if "COMPACT" in self.header['type_rinex']:
-                #print ("not using georinex")
                 #self.read_obs_rinexv2()
                 for constellation in ['G','R']:
                     obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
@@ -282,15 +286,22 @@ class rinex:
                 self.read_obs()
                 return self.list_df
             if self.header['type']=='N':
-                nav = gr.load(self.rinex_path)
-                self.df_nav = nav.to_dataframe()
+                #nav = gr.load(self.rinex_path)
+                #self.df_nav = nav.to_dataframe()
+                if self.header['constellation'] in ['G','J','C','E']:
+                    nav = self.read_nav3_ephemerids()
+                else:
+                    nav = self.read_nav3_xyz()
                 return self.df_nav
                 #nav = self.read_nav4()
                 #return self.df_nav
 
         elif (int(self.header["version"])==4) and (self.header['type']=='N'):
             print ("Will proces version 4 navigation")
-            nav = self.read_nav4()
+            if self.header['constellation'] in ['G','J','C','E']:
+                nav = self.read_nav4_ephemerids()
+            else:
+                nav = self.read_nav4_xyz()
             return self.df_nav
         
         else:
@@ -305,9 +316,8 @@ class rinex:
         
         ### First datatime
         data_head_line = self.line    
-        #print (data_head_line)
         d,nsat,list_sats = process_head_data_line(data_head_line)
-        #print (d,nsat,list_sats)
+
         
         last_item = {}
         
@@ -316,7 +326,6 @@ class rinex:
         while isat<nsat:
             self.line = self.file.readline()
             spline = self.line.split(" ")
-            #print (list_sats[isat],len(spline),spline)
             sv = list_sats[isat]
             constellation = sv[0]
             last_item[sv]=[]
@@ -348,11 +357,10 @@ class rinex:
             data_head_line = merge_str(data_head_line,self.line.replace("&","0"))
             d,nsat,list_sats = process_head_data_line(data_head_line)
         
-            #print (d,data_head_line)
             
             #line = file.readline()
             if not self.file.readline(): 
-                #print ("finished")
+
                 continue
             isat = 0
             while isat<nsat:
@@ -434,29 +442,24 @@ class rinex:
                     self.dict_obs[constellation].append(obs_item)
         
         self.file.readline()
-    
+
         
         for constellation, observations in self.dict_obs.items():
+            
             if len(observations)==0: continue
-            if constellation == 'I': continue
-            if not constellation in ['C']: continue
+            ## Discard Indian and SBAS constellations
+                # Indian constellation because only single frequency
+            if constellation in ['I']: continue
+            #if not constellation in ['J']: continue
             self.list_df[constellation] = pd.DataFrame(observations)
         
     def read_obs_rinexv2(self):
-            
-        #data_head_line = ""
+
         
         ### First datatime
-        data_head_line = self.line    
-        #print (data_head_line)
+        data_head_line = self.line   
         d,nsat,list_sats = process_head_data_line_rinexv2(data_head_line)
-        #print (d,nsat,list_sats)
-        #text = self.file.readlines()
-        #lines = text.splitlines()
-        #nlines = len(lines)
 
-        #print (nlines)
-        #print (lines)
         
          # ------------------------------------------------------------------ header
         #obs_types: list[str] = []
@@ -469,26 +472,20 @@ class rinex:
         constellation = 'all'
         nline = 0
         self.line = self.file.readline()
-        #print (self.line)
         nline+=1
         isat = 0
         while isat<nsat:
             self.line = self.file.readline()
             self.line = self.line.replace("\n","")
-           # print (self.line)
+
             nline+=1
             spline = self.line.split(" ")
-            #print (list_sats[isat],len(spline),spline)
             sv = list_sats[isat]
             
             last_item[sv]=[]
             obs_item = {"time":d, "sv":sv}
             iobs = 0
-            #print (spline)
             n_empty = 0
-            #print (d)
-            #print (sv)
-            #print (spline)
 
             while iobs<len(self.dict_obs_name[constellation]):
                 obs_name = self.dict_obs_name[constellation][iobs]
@@ -520,13 +517,8 @@ class rinex:
                         obs_item[obs_name] = last_item[sv][iobs][0]
                 iobs = iobs+1
             isat=isat+1
-            #print (obs_item)
             self.dict_obs[constellation].append(obs_item)
-        #print (self.dict_obs)
-        #for k,v in last_item.items():
-        #    print ("----------")
-        #    print (k)
-        #    print (v)
+
             
             #for s in spline:
         '''
@@ -565,22 +557,13 @@ class rinex:
         while self.line:
             
             self.line = self.file.readline()
-            #print (self.line)
-            #if "COMMENT" in self.line: print ("Problem with comment")
-            #print (d,nline, self.line)
+
             nline+=1
             data_head_line = merge_str(data_head_line,self.line.replace("&","0"))
             d,nsat,list_sats = process_head_data_line_rinexv2(data_head_line)
 
-            #print (data_head_line)
-            #print (self.line)
-            
-            #print (d)
-            ##print (self.line[:-1])
-            #print (data_head_line[:-1])
             
             self.line = self.file.readline()
-            #print ("----"+self.line+"----")
             if "COMMENT" in self.line:
                 while "COMMENT" in self.line:
                     self.line = self.file.readline()
@@ -588,20 +571,17 @@ class rinex:
                 #data_head_line = merge_str(data_head_line,self.line.replace("&","0"))
                 data_head_line = self.line 
                 d,nsat,list_sats = process_head_data_line_rinexv2(data_head_line)
-                #print (list_sats)
                 self.line = self.file.readline()
-            #print (self.line)
+
             if not self.line:
                 nline+=1
-                #print ("finished")
                 continue
             
             
             isat = 0
             while isat<nsat:
                 self.line = self.file.readline()
-                #if d>=datetime.datetime(2024,4,10,0,3,7,0) and nline<5650:
-                #    print (nline,isat,self.line[:-1])
+
                 nline+=1
                 spline = self.line[:-1].split(" ")
                 sv = list_sats[isat]
@@ -643,14 +623,10 @@ class rinex:
                                 obs_item[obs_name] = last_item[sv][iobs][0]
                         iobs = iobs+1
                     isat=isat+1
-                    #print (obs_item)
                     self.dict_obs[constellation].append(obs_item)
     
                 else:
-                    #print (d)
-                    #print (isat,nsat)
-                    #print (sv)
-                    #print (spline)
+
                     while iobs<len(self.dict_obs_name[constellation]):
                         obs_name = self.dict_obs_name[constellation][iobs]
                         if iobs<len(spline): s = spline[iobs]
@@ -677,17 +653,13 @@ class rinex:
                             else:
                                 shift = self.dict_obs_shift[constellation][iobs]
                                 v = float(str_v)/10**shift
-                                #print ("\t",iobs)
-                                #print ("\t",v)
-                                #print ("\t",last_item[sv])
                                 update_hatanaka(last_item,sv,iobs,v)                
                                 obs_item[obs_name] = last_item[sv][iobs][0]
                         iobs = iobs+1
                     isat=isat+1
                     self.dict_obs[constellation].append(obs_item)
         
-        #self.line = self.file.readline()
-        #print (self.line)
+
         nline+=1
 
         constellations = set()
@@ -705,23 +677,493 @@ class rinex:
             # Append the observation item to its respective constellation list
             self.dict_obs[constellation].append(obs_item)
 
-        #del (self.dict_obs['all'])
-        
-        #print (pd.DataFrame(self.dict_obs['all']))
+
         for constellation, observations in self.dict_obs.items():
-            if constellation in ['S','C','J','I']: continue
+            if constellation in ['I']: continue
             self.list_df[constellation] = pd.DataFrame(observations)
-        #for constellation, df in self.list_df.items():
-            #self.list_df[constellation] = pd.DataFrame(observations)
-        #    print (constellation)
-        #    print (df)
-        #sys.exit()
+
         
-        #if "I" in self.list_df.keys():
-        #    del self.list_df["I"]   
+        if "I" in self.list_df.keys():
+            del self.list_df["I"]  
+        if "all" in self.list_df.keys():
+            del self.list_df["all"]   
+
+    def read_nav3_ephemerids(self):
+
+        i = 0
+        dict_nav_data = {
+            "sv":[], "time":[], "SVclockBias":[], "SVclockDrift": [], "SVclockDrift2":[],
+            "IODE":[], "Crs":[], "DeltaN":[], "M0":[],
+            "Cuc":[], "Eccentricity":[], "Cus":[], "sqrtA":[],
+            "Toe":[], "Cic":[], "Omega0":[], "Cis":[],
+            "Io":[], "Crc":[], "omega":[], "OmegaDot":[],
+            "IDOT":[], "L2":[], "Week":[], "L2Pflag":[],
+            "svAcc":[], "health":[], "TGD":[], "IODC":[],
+            "transTime":[], "BNK":[]
+        }
+
+        
+        while self.line:
+            
+            i += 1    
+            if self.line[0]!=" ":
+                #self.line = self.file.readline()
+                sv=self.line[:3].replace(" ","0")
+                y = int(self.line[4:8])
+                m = int(self.line[9:11])
+                d = int(self.line[12:14])
+                H = int(self.line[15:17])
+                M = int(self.line[18:20])
+                S = int(self.line[21:23])
+                d = datetime.datetime(y,m,d,H,M,S,0)
+                dict_nav_data["sv"].append(sv)
+                dict_nav_data["time"].append(d)
+                il=23
+                if len(self.line)>=il+19: clock_bias = getVal(self.line[il:il+19])
+                else: clock_bias = float('NaN')
+                dict_nav_data["SVclockBias"].append(clock_bias)
+                il=il+19
+                if len(self.line)>=il+19: SVclockDrift = getVal(self.line[il:il+19])
+                else: SVclockDrift = float('NaN')
+                dict_nav_data["SVclockDrift"].append(SVclockDrift)
+                il=il+19
+                if len(self.line)>=il+19: SVclockDrift2 = getVal(self.line[il:il+19])
+                else: SVclockDrift2 = float('NaN')
+                dict_nav_data["SVclockDrift2"].append(SVclockDrift2)
+
+                self.line = self.file.readline()
+                il=4
+                if len(self.line)>=il+19: IODE = getVal(self.line[il:il+19])
+                else: IODE = float('NaN')
+                dict_nav_data["IODE"].append(IODE)
+                il=il+19
+                if len(self.line)>=il+19: Crs = getVal(self.line[il:il+19])
+                else: Crs = float('NaN')
+                dict_nav_data["Crs"].append(Crs)
+                il=il+19                
+                if len(self.line)>=il+19: DeltaN = getVal(self.line[il:il+19])
+                else: DeltaN = float('NaN')
+                dict_nav_data["DeltaN"].append(DeltaN)                
+                il=il+19
+                if len(self.line)>=il+19: M0 = getVal(self.line[il:il+19])
+                else: M0 = float('NaN')
+                dict_nav_data["M0"].append(M0)    
+
+                self.line = self.file.readline()
+                il=4
+                if len(self.line)>=il+19: Cuc = getVal(self.line[il:il+19])
+                else: Cuc = float('NaN')
+                dict_nav_data["Cuc"].append(Cuc)
+                il=il+19
+                if len(self.line)>=il+19: Eccentricity = getVal(self.line[il:il+19])
+                else: Eccentricity = float('NaN')
+                dict_nav_data["Eccentricity"].append(Eccentricity)
+                il=il+19
+                if len(self.line)>=il+19: Cus = getVal(self.line[il:il+19])
+                else: Cus = float('NaN')
+                dict_nav_data["Cus"].append(Cus)                
+                il=il+19
+                if len(self.line)>=il+19: sqrtA = getVal(self.line[il:il+19])
+                else: sqrtA = float('NaN')
+                dict_nav_data["sqrtA"].append(sqrtA) 
+
+                self.line = self.file.readline()
+                il=4
+                if len(self.line)>=il+19: Toe = getVal(self.line[il:il+19])
+                else: Toe = float('NaN')
+                dict_nav_data["Toe"].append(Toe)
+                il=il+19
+                if len(self.line)>=il+19: Cic = getVal(self.line[il:il+19])
+                else: Cic = float('NaN')
+                dict_nav_data["Cic"].append(Cic)
+                il=il+19
+                if len(self.line)>=il+19: Omega0 = getVal(self.line[il:il+19])
+                else: Omega0 = float('NaN')
+                dict_nav_data["Omega0"].append(Omega0)                
+                il=il+19
+                if len(self.line)>=il+19: Cis = getVal(self.line[il:il+19])
+                else: Cis = float('NaN')
+                dict_nav_data["Cis"].append(Cis) 
+
+                self.line = self.file.readline()
+                il=4
+                if len(self.line)>=il+19: Io = getVal(self.line[il:il+19])
+                else: Io = float('NaN')
+                dict_nav_data["Io"].append(Io)
+                il=il+19
+                if len(self.line)>=il+19: Crc = getVal(self.line[il:il+19])
+                else: Crc = float('NaN')
+                dict_nav_data["Crc"].append(Crc)
+                il=il+19
+                if len(self.line)>=il+19: omega = getVal(self.line[il:il+19])
+                else: omega = float('NaN')
+                dict_nav_data["omega"].append(omega)                
+                il=il+19
+                if len(self.line)>=il+19: OmegaDot = getVal(self.line[il:il+19])
+                else: OmegaDot = float('NaN')
+                dict_nav_data["OmegaDot"].append(OmegaDot) 
 
 
-    '''
+                self.line = self.file.readline()
+                il=4
+                if len(self.line)>=il+19: IDOT = getVal(self.line[il:il+19])
+                else: IDOT = float('NaN')
+                dict_nav_data["IDOT"].append(IDOT)
+                il=il+19
+                if len(self.line)>=il+19: L2 = getVal(self.line[il:il+19])
+                else: L2 = float('NaN')
+                dict_nav_data["L2"].append(L2)
+                il=il+19
+                if len(self.line)>=il+19: Week = getVal(self.line[il:il+19])
+                else: Week = float('NaN')
+                dict_nav_data["Week"].append(Week)                
+                il=il+19
+                if len(self.line)>=il+19: L2Pflag = getVal(self.line[il:il+19])
+                else: L2Pflag = float('NaN')
+                dict_nav_data["L2Pflag"].append(L2Pflag) 
+                
+                self.line = self.file.readline()
+                il=4
+                if len(self.line)>=il+19: svAcc = getVal(self.line[il:il+19])
+                else: svAcc = float('NaN')
+                dict_nav_data["svAcc"].append(svAcc)
+                il=il+19
+                if len(self.line)>=il+19: health = getVal(self.line[il:il+19])
+                else: health = float('NaN')
+                dict_nav_data["health"].append(health)
+                il=il+19
+                if len(self.line)>=il+19: TGD = getVal(self.line[il:il+19])
+                else: TGD = float('NaN')
+                dict_nav_data["TGD"].append(TGD)                
+                il=il+19
+                if len(self.line)>=il+19: IODC = getVal(self.line[il:il+19])
+                else: IODC = float('NaN')
+                dict_nav_data["IODC"].append(IODC) 
+
+                self.line = self.file.readline().replace("\n","")
+                il=4
+                transTime = float(self.line[il:il+19].replace("D","E"))
+                if len(self.line)>=il+19: transTime = getVal(self.line[il:il+19])
+                else: transTime = float('NaN')
+                dict_nav_data["transTime"].append(transTime)
+                il=il+19
+                if len(self.line)>=il+19: BNK = getVal(self.line[il:il+19])
+                else: BNK = float('NaN')
+                dict_nav_data["BNK"].append(BNK)
+            self.line = self.file.readline()
+
+        self.df_nav = pd.DataFrame(dict_nav_data)
+        self.df_nav.set_index(["time","sv"],inplace=True)
+ 
+
+    def read_nav3_xyz(self):
+        
+        i = 0
+        dict_nav_data = {
+            "sv":[], "time":[], "SVclockBias":[], "SVrelFreqBias": [], "MessageFrameTime":[],
+            "X":[], "dX":[], "dX2":[], "health":[],
+            "Y":[], "dY":[], "dY2":[], "URA":[],
+            "Z":[], "dZ":[], "dZ2":[], "IODN":[]           
+        }
+        
+        while self.line:
+            
+            i += 1    
+            if self.line[0]!=" ":
+
+                sv=self.line[:3]
+                y = int(self.line[4:8])
+                m = int(self.line[9:11])
+                d = int(self.line[12:14])
+                H = int(self.line[15:17])
+                M = int(self.line[18:20])
+                S = int(self.line[21:23])
+                d = datetime.datetime(y,m,d,H,M,S,0)
+                dict_nav_data["sv"].append(sv)
+                dict_nav_data["time"].append(d)
+                il=23
+                clock_bias = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["SVclockBias"].append(clock_bias)
+                il=il+19
+                rel_freq_bias = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["SVrelFreqBias"].append(rel_freq_bias)
+                il=il+19
+                transmission_time = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["MessageFrameTime"].append(transmission_time)
+
+                self.line = self.file.readline()
+                il=4
+                X = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["X"].append(X*1e3)
+                il=il+19
+                dX = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dX"].append(dX*1e3)
+                il=il+19
+                dX2 = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dX2"].append(dX2*1e3)                
+                il=il+19
+                health = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["health"].append(health)    
+
+                self.line = self.file.readline()
+                il=4
+                Y = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Y"].append(Y*1e3)
+                il=il+19
+                dY = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dY"].append(dY*1e3)
+                il=il+19
+                dY2 = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dY2"].append(dY2*1e3)                
+                il=il+19
+                acc_code = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["URA"].append(acc_code) 
+
+                self.line = self.file.readline()
+                il=4
+                Z = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Z"].append(Z*1e3)
+                il=il+19
+                dZ = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dZ"].append(dZ*1e3)
+                il=il+19
+                dZ2 = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dZ2"].append(dZ2*1e3)                
+                il=il+19
+                iodn = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["IODN"].append(iodn) 
+
+            self.line = self.file.readline()
+
+        self.df_nav = pd.DataFrame(dict_nav_data)
+        self.df_nav.set_index(["time","sv"],inplace=True)
+    
+            #if i>20: break
+
+    def read_nav4_ephemerids(self):
+
+        i = 0
+        dict_nav_data = {
+            "sv":[], "time":[], "SVclockBias":[], "SVclockDrift": [], "SVclockDrift2":[],
+            "IODE":[], "Crs":[], "DeltaN":[], "M0":[],
+            "Cuc":[], "Eccentricity":[], "Cus":[], "sqrtA":[],
+            "Toe":[], "Cic":[], "Omega0":[], "Cis":[],
+            "Io":[], "Crc":[], "omega":[], "OmegaDot":[],
+            "IDOT":[], "L2":[], "Week":[], "L2Pflag":[],
+            "svAcc":[], "health":[], "TGD":[], "IODC":[],
+            "transTime":[], "BNK":[]
+        }
+        
+        while self.line:
+            
+            i += 1    
+            if self.line[0]==">":
+                self.line = self.file.readline()
+                sv=self.line[:3]
+                y = int(self.line[4:8])
+                m = int(self.line[9:11])
+                d = int(self.line[12:14])
+                H = int(self.line[15:17])
+                M = int(self.line[18:20])
+                S = int(self.line[21:23])
+                d = datetime.datetime(y,m,d,H,M,S,0)
+                dict_nav_data["sv"].append(sv)
+                dict_nav_data["time"].append(d)
+                il=23
+                clock_bias = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["SVclockBias"].append(clock_bias)
+                il=il+19
+                rel_freq_bias = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["SVclockDrift"].append(rel_freq_bias)
+                il=il+19
+                transmission_time = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["SVclockDrift2"].append(transmission_time)
+
+                self.line = self.file.readline()
+                il=4
+                IODE = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["IODE"].append(IODE)
+                il=il+19
+                Crs = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Crs"].append(Crs)
+                il=il+19
+                DeltaN = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["DeltaN"].append(DeltaN)                
+                il=il+19
+                M0 = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["M0"].append(M0)    
+
+                self.line = self.file.readline()
+                il=4
+                Cuc = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Cuc"].append(Cuc)
+                il=il+19
+                Eccentricity = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Eccentricity"].append(Eccentricity)
+                il=il+19
+                Cus = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Cus"].append(Cus)                
+                il=il+19
+                sqrtA = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["sqrtA"].append(sqrtA) 
+
+                self.line = self.file.readline()
+                il=4
+                Toe = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Toe"].append(Toe)
+                il=il+19
+                Cic = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Cic"].append(Cic)
+                il=il+19
+                Omega0 = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Omega0"].append(Omega0)                
+                il=il+19
+                Cis = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Cis"].append(Cis) 
+
+                self.line = self.file.readline()
+                il=4
+                Io = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Io"].append(Io)
+                il=il+19
+                Crc = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Crc"].append(Crc)
+                il=il+19
+                omega = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["omega"].append(omega)                
+                il=il+19
+                OmegaDot = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["OmegaDot"].append(OmegaDot) 
+
+
+                self.line = self.file.readline()
+                il=4
+                IDOT = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["IDOT"].append(IDOT)
+                il=il+19
+                L2 = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["L2"].append(L2)
+                il=il+19
+                Week = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Week"].append(Week)                
+                il=il+19
+                L2Pflag = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["L2Pflag"].append(L2Pflag) 
+                
+                self.line = self.file.readline()
+                il=4
+                svAcc = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["svAcc"].append(svAcc)
+                il=il+19
+                health = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["health"].append(health)
+                il=il+19
+                TGD = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["TGD"].append(TGD)                
+                il=il+19
+                IODC = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["IODC"].append(IODC) 
+
+                self.line = self.file.readline()
+                il=4
+                transTime = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["transTime"].append(transTime)
+                il=il+19
+                BNK = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["BNK"].append(BNK)
+
+                dict_nav_data
+            self.line = self.file.readline()
+
+        self.df_nav = pd.DataFrame(dict_nav_data)
+        self.df_nav.set_index(["time","sv"],inplace=True)
+
+
+    def read_nav4_xyz(self):
+        
+        i = 0
+        dict_nav_data = {
+            "sv":[], "time":[], "SVclockBias":[], "SVrelFreqBias": [], "MessageFrameTime":[],
+            "X":[], "dX":[], "dX2":[], "health":[],
+            "Y":[], "dY":[], "dY2":[], "URA":[],
+            "Z":[], "dZ":[], "dZ2":[], "IODN":[]           
+        }
+        
+        while self.line:
+            
+            i += 1    
+            if self.line[0]==">":
+                self.line = self.file.readline()
+                sv=self.line[:3]
+                y = int(self.line[4:8])
+                m = int(self.line[9:11])
+                d = int(self.line[12:14])
+                H = int(self.line[15:17])
+                M = int(self.line[18:20])
+                S = int(self.line[21:23])
+                d = datetime.datetime(y,m,d,H,M,S,0)
+                dict_nav_data["sv"].append(sv)
+                dict_nav_data["time"].append(d)
+                il=23
+                clock_bias = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["SVclockBias"].append(clock_bias)
+                il=il+19
+                rel_freq_bias = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["SVrelFreqBias"].append(rel_freq_bias)
+                il=il+19
+                transmission_time = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["MessageFrameTime"].append(transmission_time)
+
+                self.line = self.file.readline()
+                il=4
+                X = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["X"].append(X*1e3)
+                il=il+19
+                dX = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dX"].append(dX*1e3)
+                il=il+19
+                dX2 = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dX2"].append(dX2*1e3)                
+                il=il+19
+                health = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["health"].append(health)    
+
+                self.line = self.file.readline()
+                il=4
+                Y = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Y"].append(Y*1e3)
+                il=il+19
+                dY = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dY"].append(dY*1e3)
+                il=il+19
+                dY2 = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dY2"].append(dY2*1e3)                
+                il=il+19
+                acc_code = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["URA"].append(acc_code) 
+
+                self.line = self.file.readline()
+                il=4
+                Z = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["Z"].append(Z*1e3)
+                il=il+19
+                dZ = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dZ"].append(dZ*1e3)
+                il=il+19
+                dZ2 = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["dZ2"].append(dZ2*1e3)                
+                il=il+19
+                iodn = float(self.line[il:il+19].replace("D","E"))
+                dict_nav_data["IODN"].append(iodn) 
+
+            self.line = self.file.readline()
+
+        self.df_nav = pd.DataFrame(dict_nav_data)
+        self.df_nav.set_index(["time","sv"],inplace=True)
+
+
+
+'''
     def read_obs_rinexv2(self):
  
         data_head_line = self.line
@@ -1000,89 +1442,4 @@ class rinex:
         self.df_nav = pd.DataFrame(dict_nav_data)
         self.df_nav.set_index(["time","sv"],inplace=True)
         #sys.exit()
-    '''
-
-            
-            #if i>20: break
-
-    def read_nav4(self):
-        
-        i = 0
-        dict_nav_data = {
-            "sv":[], "time":[], "SVclockBias":[], "SVrelFreqBias": [], "MessageFrameTime":[],
-            "X":[], "dX":[], "dX2":[], "health":[],
-            "Y":[], "dY":[], "dY2":[], "URA":[],
-            "Z":[], "dZ":[], "dZ2":[], "IODN":[]           
-        }
-        
-        while self.line:
-            
-            i += 1    
-            if self.line[0]==">":
-                self.line = self.file.readline()
-                sv=self.line[:3]
-                y = int(self.line[4:8])
-                m = int(self.line[9:11])
-                d = int(self.line[12:14])
-                H = int(self.line[15:17])
-                M = int(self.line[18:20])
-                S = int(self.line[21:23])
-                d = datetime.datetime(y,m,d,H,M,S,0)
-                dict_nav_data["sv"].append(sv)
-                dict_nav_data["time"].append(d)
-                il=24
-                clock_bias = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["SVclockBias"].append(clock_bias)
-                il=il+19
-                rel_freq_bias = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["SVrelFreqBias"].append(rel_freq_bias)
-                il=il+19
-                transmission_time = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["MessageFrameTime"].append(transmission_time)
-
-                self.line = self.file.readline()
-                il=4
-                X = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["X"].append(X*1e3)
-                il=il+19
-                dX = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["dX"].append(dX*1e3)
-                il=il+19
-                dX2 = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["dX2"].append(dX2*1e3)                
-                il=il+19
-                health = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["health"].append(health)    
-
-                self.line = self.file.readline()
-                il=4
-                Y = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["Y"].append(Y*1e3)
-                il=il+19
-                dY = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["dY"].append(dY*1e3)
-                il=il+19
-                dY2 = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["dY2"].append(dY2*1e3)                
-                il=il+19
-                acc_code = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["URA"].append(acc_code) 
-
-                self.line = self.file.readline()
-                il=4
-                Z = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["Z"].append(Z*1e3)
-                il=il+19
-                dZ = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["dZ"].append(dZ*1e3)
-                il=il+19
-                dZ2 = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["dZ2"].append(dZ2*1e3)                
-                il=il+19
-                iodn = float(self.line[il:il+19].replace("D","E"))
-                dict_nav_data["IODN"].append(iodn) 
-
-                self.line = self.file.readline()
-
-        self.df_nav = pd.DataFrame(dict_nav_data)
-        self.df_nav.set_index(["time","sv"],inplace=True)
+'''
