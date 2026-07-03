@@ -9,6 +9,7 @@ test.py
 .env
 __pycache__
 .ipynb*
+test/
 tests/
 dist/
 

@@ -42,6 +42,8 @@ simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
 from pathlib import Path
 
+import psutil
+
 pd.options.mode.chained_assignment = None
 
 #import random
@@ -60,6 +62,7 @@ Alt_i = 300000
 R_E = 6370000
 omega_e = 7.2921151467e-5
 GM = 3.986005e14
+sqrt_GM = math.sqrt(GM)
 C20 = -1082.63e-6
 a_major_ellipsoid_axis = 6378136
 
@@ -83,6 +86,7 @@ def removeOutsiders(df,thres=datetime.timedelta(days=1)):
     outsider=[]
     istail = False
     thres_t = datetime.timedelta(days=1)
+    #hasValidData = False
     for d in range(len(diff_t)):
         if diff_t[d]>thres_t: 
             outsider.append(True)
@@ -91,6 +95,12 @@ def removeOutsiders(df,thres=datetime.timedelta(days=1)):
                 istail=True
                 outsider.append(False)
             outsider.append(False)
+            #hasValidData = True
+
+
+    #if not hasValidData:
+    #   return pd.DataFrame()
+
             
     df["out"] = outsider
     df = df[df["out"]==False]
@@ -98,8 +108,7 @@ def removeOutsiders(df,thres=datetime.timedelta(days=1)):
     return df
 
 def ephemeris_to_XYZ(data,date):
-    
-    #sys.exit()
+
     Toe = data['Toe']
     #TGD = data['TGD']
     IDOT = data['IDOT']
@@ -137,13 +146,17 @@ def ephemeris_to_XYZ(data,date):
 
     
     tk = (date-d0).total_seconds()
-    if tk > 302400:
-        tk -= 604800
-    elif tk < -302400:
-        tk += 604800
+    #if tk > 302400: 
+    #    print ("big tk",tk)
+    #    return [float('NaN'),float('NaN'),float('NaN')]
+    #    #tk -= 604800
+    #elif tk < -302400: 
+    #    print ("big tk",tk)
+    #    return [float('NaN'),float('NaN'),float('NaN')]
+    #    #tk += 604800
 
 
-    n0 = math.sqrt(GM)/sqrtA**3
+    n0 = sqrt_GM/sqrtA**3
     n = n0 + DeltaN
     
     Mk = M0 + n*tk
@@ -256,67 +269,66 @@ def split_interpolate_concat(df, gap_threshold='3h'):
 
 
 def remove_duplicated_dates(file_path):
-
-  f = open(file_path,'r')
-
-  is_header = True
-  i = 0
-  data_line_batch = ""
-  dict_prn_dates = {}
-
-  new_file_lines = ""
-
-  for line in f:
-
-    # Check where is the header, just to copy in the new file
-    if "END OF HEADER" in line:
-      is_header = False
-      new_file_lines += line
-      continue
-    # If we are in the header copy and next line
-    if is_header:
-      new_file_lines += line
-      continue
-
-    # if we are in the first line of the data for a PRN and date, read date
-    if i%8==0:
-      # First time there is nothing to write yet.
-      if i!=0:
-        # If the satellite was already found before, 
-        # check that the date was not already seen
-        if PRN in dict_prn_dates.keys():
-          # If date not seen, add it to seen dates, and add data_batch to new file 
-          #    else do nothing
-          if date not in dict_prn_dates[PRN]:
-            dict_prn_dates[PRN].append(date)
+    f = open(file_path,'r')
+  
+    is_header = True
+    i = 0
+    data_line_batch = ""
+    dict_prn_dates = {}
+  
+    new_file_lines = ""
+  
+    for line in f:
+  
+      # Check where is the header, just to copy in the new file
+      if "END OF HEADER" in line:
+        is_header = False
+        new_file_lines += line
+        continue
+      # If we are in the header copy and next line
+      if is_header:
+        new_file_lines += line
+        continue
+  
+      # if we are in the first line of the data for a PRN and date, read date
+      if i%8==0:
+        # First time there is nothing to write yet.
+        if i!=0:
+          # If the satellite was already found before, 
+          # check that the date was not already seen
+          if PRN in dict_prn_dates.keys():
+            # If date not seen, add it to seen dates, and add data_batch to new file 
+            #    else do nothing
+            if date not in dict_prn_dates[PRN]:
+              dict_prn_dates[PRN].append(date)
+              new_file_lines += data_line_batch
+          # If satellite not found, then create key, put date in dict
+          #    and copy data_batch to new file
+          else:
+            dict_prn_dates[PRN] = [date]
             new_file_lines += data_line_batch
-        # If satellite not found, then create key, put date in dict
-        #    and copy data_batch to new file
-        else:
-          dict_prn_dates[PRN] = [date]
-          new_file_lines += data_line_batch
-
-      PRN = line[:3]
-      # Get date
-      date = datetime.datetime.strptime(line[4:23],"%Y %m %d %H %M %S")
-
-      # Empty data_line_batch
-      data_line_batch = ""
-    
-    data_line_batch += line
-    i += 1
-
-  ## Do the last data since it is not processed at the end of the loop.
-  if PRN in dict_prn_dates.keys():
-    if date not in dict_prn_dates[PRN]:
+  
+        PRN = line[:3]
+        # Get date
+        date = datetime.datetime.strptime(line[4:23],"%Y %m %d %H %M %S")
+  
+        # Empty data_line_batch
+        data_line_batch = ""
+      
+      data_line_batch += line
+      i += 1
+  
+    ## Do the last data since it is not processed at the end of the loop.
+    if PRN in dict_prn_dates.keys():
+      if date not in dict_prn_dates[PRN]:
+        new_file_lines += data_line_batch
+    else: 
       new_file_lines += data_line_batch
-  else: 
-    new_file_lines += data_line_batch
-  f.close()
-
-  f = open(file_path,'w')
-  f.write(new_file_lines)
-  f.close()
+    f.close()
+  
+    f = open(file_path,'w')
+    f.write(new_file_lines)
+    f.close()
 
 
 class gnss:
@@ -341,8 +353,7 @@ class gnss:
     f_doy_reported = ""
     
     
-    def __init__(self,f_nav=[],form='feather'):
-
+    def __init__(self,f_nav=[],datemin=None, datemax=None, form='feather'):
         self.gnss_dir = st.root_dir + "GNSS/"
         
         if not os.path.exists(self.gnss_dir):
@@ -350,6 +361,9 @@ class gnss:
             except OSError as e:
                 if e.errno!=17: print ("FAIL creation of directory "+self.gnss_dir, e )
             else: print ("Successfully created the directory "+self.gnss_dir)
+
+        self.datemin = datemin
+        self.datemax = datemax
 
         self.file_format = form
         self.list_f_rinex_nav = f_nav
@@ -369,7 +383,6 @@ class gnss:
 
 
     def inform_date_processed(self,list_date,constellation):
-        
         # Make sure there is data before 10:00
         cutoff_I = datetime.time(4, 0)
         cutoff_F = datetime.time(20, 0)
@@ -393,7 +406,6 @@ class gnss:
     #   with the resolution informed when instanciating the gnss object
     def compute_position(self):
 
-        print ("Compute position of GNSS satellites")
         directory_path = Path(self.gnss_dir + "/")
 
         for const in self.list_constellation:
@@ -409,10 +421,8 @@ class gnss:
         for f_rinex_nav in self.list_f_rinex_nav:
             
             if f_rinex_nav.name in dict_file_processed['files']: continue
-            else: dict_file_processed['files'].append(f_rinex_nav.name)
 
-            try:
-                nav = rx.rinex(str(f_rinex_nav))
+            try: nav = rx.rinex(str(f_rinex_nav))
             except: continue
             head = nav.read_header()
             svtype = head['constellation']
@@ -438,6 +448,8 @@ class gnss:
 
             df_nav.index = pd.to_datetime(df_nav.index)
 
+            dict_file_processed['files'].append(f_rinex_nav.name)
+
             if len(df_nav)==0: 
                 continue
 
@@ -446,6 +458,17 @@ class gnss:
             df_nav.sort_index(ascending=True,inplace=True)
             self.df_nav_gnss[svtype] = pd.concat([self.df_nav_gnss[svtype],df_nav])
 
+        min_date = self.datemin.replace(second=0, microsecond=0)
+        max_date = self.datemax.replace(second=0, microsecond=0)
+
+        time_list = []
+        t = min_date
+
+        self.resolution = 60
+                            
+        while t<max_date:
+            time_list.append(t)
+            t = t+datetime.timedelta(seconds=self.resolution)
 
         for const in self.df_nav_gnss.keys():
             if (len(self.df_nav_gnss[const])<=2): continue
@@ -453,32 +476,38 @@ class gnss:
             self.df_nav_gnss[const] = self.df_nav_gnss[const].groupby(["time","sv"]).mean()
             self.df_nav_gnss[const].reset_index(level=["sv"],inplace=True)
 
+
             for sv in list_sv:
-                
+                print (sv)
+
                 if len(sv)>3: continue
                 df_sat = self.df_nav_gnss[const][self.df_nav_gnss[const]["sv"]==sv]
                 if len(df_sat)<3: continue
 
-                df_sat = removeOutsiders(df_sat)
+                #if sv=="G14": print (df_sat)
+
+                #if os.path.exists("output/GNSS/"+sv+".feather"): continue
+
+
+                #df_sat = removeOutsiders(df_sat)
+                #df_sat = df_sat[ (df_sat.index>self.datemin) & (df_sat.index<self.datemax) ]
                 
-                min_date = min(df_sat.index)
-                max_date = max(df_sat.index)
-                
-                time_list = []
-                t = min_date
-                            
-                while t<=max_date:
-                    time_list.append(t)
-                    t = t+datetime.timedelta(seconds=self.resolution)
+                #min_date = min(df_sat.index)
+                #max_date = max(df_sat.index)
+
+
 
                 if sv[0] in ['G','E','C','J']:
                     i_time_list = 0
                     date = time_list[i_time_list]
                     # Intermediate dictionary intended to contain data of the satellite under process 
                     dict_sat_pos = {"time":[],"X":[],"Y":[],"Z":[]}
+                    df_sat = df_sat[df_sat['sqrtA']!=0]
                     for t_nav, row in df_sat.iterrows():
+                        #if sv=="G14": print (t_nav)
                         # Calculate position for each time in time_list that are before the next available position information
                         while date < t_nav and i_time_list<len(time_list):
+                            #if sv=="G14": print ("\t",date)
                             sat_pos = ephemeris_to_XYZ(row,date)
                             dict_sat_pos["time"].append(date)
                             dict_sat_pos["X"].append(sat_pos[0])
@@ -512,12 +541,67 @@ class gnss:
     
                 if os.path.exists(csv_nav_sat):
                     df_former_sat = pd.read_feather(csv_nav_sat)
-                    df_sat = pd.concat([df_sat,df_former_sat])
-                
-                df_sat.to_feather(csv_nav_sat)
+                    df_former_sat = df_former_sat[~df_former_sat.index.isin(df_sat.index)]
+                    df_sat = pd.concat([df_former_sat,df_sat])
+                    df_sat = df_sat.sort_index()
+
+
+                df_sat.drop_duplicates().to_feather(csv_nav_sat)
         
         df_doy_processed = pd.DataFrame(dict_file_processed)
         df_doy_processed.to_csv(self.csv_record_processing,index=True)
+
+    def load_all_sats(self):
+
+        '''
+            Constellation: G: GPS
+                            R: GLONASS
+                            E: GALILEO
+        '''
+    
+        ##year = d_in.year
+        first = True
+
+        gnss_data_dir = Path(self.gnss_dir )
+
+        folder = Path(gnss_data_dir)
+        list_gnss = [f for f in folder.glob('*feather') if f.is_file()]
+
+        tot_mem_gnss_loaded = 0
+        tot_mem_gnss = 0
+
+        for fgnss in list_gnss:
+
+            sat_path = fgnss.resolve()
+            sat_file = fgnss.name
+            split_sat = sat_file.split(".")
+
+            if split_sat[-1]!="feather": continue
+            sat = split_sat[0]
+            
+            self.dict_df_pos[sat] = pd.read_feather(sat_path)
+    
+            self.dict_df_pos[sat].index = pd.to_datetime(self.dict_df_pos[sat].index)
+            #print(f"dict_df_pos[{sat}]: {sys.getsizeof(self.dict_df_pos[sat])/ 1024**2:.2f} MB, len(dict_df_pos[{sat}])={len(self.dict_df_pos[sat])}")
+            tot_mem_gnss_loaded += sys.getsizeof(self.dict_df_pos[sat])
+
+            mask = (self.dict_df_pos[sat].index>=self.datemin) & (self.dict_df_pos[sat].index<=self.datemax)
+            self.dict_df_pos[sat]=self.dict_df_pos[sat].loc[mask]
+
+            tot_mem_gnss += sys.getsizeof(self.dict_df_pos[sat])
+
+
+            if first:
+                self.df_pos = self.dict_df_pos[sat]
+                self.df_pos["sv"] = sat
+                first = False
+            else:
+                df_inter = self.dict_df_pos[sat]
+                df_inter["sv"] = sat
+                self.df_pos = pd.concat([self.df_pos,df_inter])
+
+        self.df_pos.drop_duplicates(inplace=True)
+
 
     
     # Function that loads the satellite of a specific year, files must exist, otherwise load empty
@@ -549,6 +633,7 @@ class gnss:
             
             self.dict_df_pos[sat] = pd.read_feather(sat_path)
 
+
             self.dict_df_pos[sat].index = pd.to_datetime(self.dict_df_pos[sat].index)
             mask = (self.dict_df_pos[sat].index>=d_in) & (self.dict_df_pos[sat].index<=d_out)
             self.dict_df_pos[sat]=self.dict_df_pos[sat].loc[mask]
@@ -562,11 +647,15 @@ class gnss:
                 df_inter["sv"] = sat
                 self.df_pos = pd.concat([self.df_pos,df_inter])
 
+        self.df_pos.drop_duplicates(inplace=True)
+
 
     
     def getElevation(self,df,pos_antena):
 
         norm_antena = np.linalg.norm(pos_antena)
+
+
         
         dfdif = pd.DataFrame() 
         if len(self.df_pos)==0: 
@@ -584,6 +673,7 @@ class gnss:
         
         sin_phi = nv/norm
         self.df_pos["elevation"] = np.arcsin(sin_phi)
+
 
         return df.merge(self.df_pos,how='left',on=['sv','time']) 
 

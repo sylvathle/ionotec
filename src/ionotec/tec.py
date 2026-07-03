@@ -23,9 +23,12 @@
 #  SOFTWARE.
 #
 #############################################################################
+##import os,sys
+#import psutil
 
 #import gnss
 import georinex as gr
+
 #import stations as st
 import pandas as pd
 import scipy.constants as csts
@@ -41,6 +44,11 @@ import pymap3d as pm
 import math	
 import time
 import re
+
+
+import psutil
+#import gc
+#from pympler import asizeof
 
 from pathlib import Path
 
@@ -72,6 +80,9 @@ def fit_lin(t,sig):
         d-=2*t[i]*sig[i] # A coef
         e-=2*sig[i] # B coef
 
+    if (a==0) and (c==0):
+        return float('NaN'),float('NaN'),float('NaN'),float('NaN')
+        
     # Forward A and B parameters of linear fit (solve the minimum of mse)
     A=-(2*b*d-c*e)/(4*a*b-c**2)
     B=-(c*d-2*a*e)/(c**2-4*a*b)
@@ -166,7 +177,6 @@ def plot_leap(diffs,series,s,A,B,N,borders,title=""):
 
 
 def process_br(df,h):
-   
     # Coefficients of the quadratic error function that will be computed
     a,b=0,0
 
@@ -207,7 +217,7 @@ def process_br(df,h):
         # We also ignore "2" factor for a since is cancels in -b/(2a) root calculation
         a=a+(sum_ci2-(1/N)*sum_ci**2)/N
         b=b+(sum_sici2-(1/N)*sum_sici*sum_ci)/N
-        if math.isnan(a) or math.isnan(b): sys.exit()
+        if math.isnan(a) or math.isnan(b): return float('NaN')
 
     if a==0: return float("nan")
     # root of error function = receiver bias.
@@ -241,16 +251,10 @@ class tec:
 
     source_data_folder = ""
 
-    def __init__(self,rinex_folder,
-                 date_min=None,date_max=None,
-                 min_lat=None,min_lon=None,
-                 h=350000):
-
+    def __init__(self):
         self.station = ""
         self.coord = ""
 
-        # Estimated high of ionosphere
-        self.h = h
 
         #Resolution that will be used for the process (should by 60 seconds)
         self.resolution = 60
@@ -271,7 +275,6 @@ class tec:
         self.list_df = {}
 
         self.list_obs_stations = []
-
         
         self.df_sat_DCB = pd.DataFrame()
         
@@ -286,8 +289,11 @@ class tec:
         self.br = {'station':[],'constellation':[],'time_i':[],'time_f':[],'br':[]}
         
         if not os.path.exists(st.root_dir + "TEC/"):
-            os.mkdir(st.root_dir + "TEC/", exist_ok=True)
+            os.mkdir(st.root_dir + "TEC/")
         
+    def load_rinex_folder(self,folder,date_min=None, date_max=None,h=350000):
+        self.h = h
+
         self.datemin = date_min
         self.datemax = date_max
         self.source_data_folder = rinex_folder
@@ -298,10 +304,38 @@ class tec:
         self.load_sat_DCB()
         self.sat_dcb.reset_index(inplace=True)
 
-    ''' Function that prepare the obs, nav and bias list '''
-    def prepare_files(self):
+    def load_rinex_lists(self,list_f_obs,list_f_nav,list_f_dcb,datemin=None, datemax=None, h=350000):
+        self.h = h
 
-        # Define the target directory
+        self.list_f_obs = list_f_obs 
+        # List of navigation files
+        self.list_f_nav = list_f_nav
+        # File containing satellite bias
+        self.list_f_dcb = list_f_dcb
+
+        for f in list_f_obs:
+            station = f.name[:4].lower()
+            if not station in self.list_obs_stations:
+                self.list_obs_stations.append(station)
+                self.dict_f_obs[station] = [f]
+            else:
+                self.dict_f_obs[station].append(f)
+        
+
+        self.datemin = datemin
+        self.datemax = datemax
+        
+
+        self.gnss = gnss.gnss(self.list_f_nav,self.datemin,self.datemax)
+        self.gnss.load_all_sats()
+
+        self.load_sat_DCB()
+        self.sat_dcb.reset_index(inplace=True)
+
+        for station in self.dict_f_obs.keys():
+            self.dict_f_obs[station] = sorted(self.dict_f_obs[station])
+
+    def prepare_files(self):
         directory_path = Path(self.source_data_folder)
         
         # List all files recursively
@@ -387,92 +421,9 @@ class tec:
                         self.dict_f_obs[station].append(str(file))
                         break
 
-
     def get_observation_station_list(self):
         return self.list_obs_stations
 
-
-    '''
-    def __init__(self,list_f_obs,f_nav,list_f_sat_DCB=[],outfolder="output",resolution=60,h=350000):
-    
-        # List of observation files
-        self.list_f_obs = list_f_obs 
-        # List of navigation files
-        self.f_nav = f_nav
-        # File containing satellite bias
-        self.list_f_sat_DCB = list_f_sat_DCB
-        #Output feather file
-        #if f_out == "": 
-        #    self.f_feather = self.list_f_obs[min(len(self.list_f_obs)-1,1)][:-4]+"tec.feather"
-        #else:
-        #    if f_out[-8:] ==".feather": self.f_feather = f_out
-        #    else: self.f_feather = f_out + ".feather"
-    
-        self.sv_gps = [str(i+1) for i in range(32)]
-        for i,sv in enumerate(self.sv_gps):
-            if i<9: self.sv_gps[i] = "G0"+self.sv_gps[i]
-            else: self.sv_gps[i] = "G"+self.sv_gps[i]
-
-        self.sv_glonass = [str(i+1) for i in range(24)]
-        for i,sv in enumerate(self.sv_glonass):
-            if i<9: self.sv_glonass[i] = "R0"+self.sv_glonass[i]
-            else: self.sv_glonass[i] = "R"+self.sv_glonass[i]
-
-        self.sv_galileo = [str(i+1) for i in range(36)]
-        for i,sv in enumerate(self.sv_galileo):
-            if i<9: self.sv_galileo[i] = "E0"+self.sv_galileo[i]
-            else: self.sv_galileo[i] = "E"+self.sv_galileo[i]
-        
-        ##if not os.path.isfile(self.f_sat_bias): 
-    
-        # Test if each file in list of stations exists    
-        for f_obs in self.list_f_obs:
-            if not os.path.exists(f_obs):
-                return       
-        
-        self.station = ""
-        self.coord = ""
-
-        # Estimated high of ionosphere
-        self.h = h
-
-        #Resolution that will be used for the process (should by 60 seconds)
-        self.resolution = 60
-
-        # Resolution of the rinex station, in seconds.
-        #self.obs_resolution = ""
-
-        # DataFrame containing observation data
-        self.df_obs = pd.DataFrame()
-
-        # List of satellites that have been observed
-        self.sv = []
-
-        # List of dictionnaries containing borders of signal for each satellite
-        self.borders={}
-
-        ## MAIN OUTPUT
-        self.list_df = {}
-
-        
-        self.df_sat_DCB = pd.DataFrame()
-        
-        # Time and year of file
-        self.year = None
-        self.doy = None
-        self.t_min = {}
-        self.t_max = {}
-
-        # Bias of the antenna, calculated by method "compute_reveiver_bias"
-        # Value stored in csv "stations.csv"
-        self.br = {'station':[],'constellation':[],'time_i':[],'time_f':[],'chanel1':[],'chanel2':[],'br':[]}
-        
-        if not os.path.exists(st.root_dir + "TEC/"):
-            os.mkdir(st.root_dir + "TEC/")
-
-    '''
-
-   
     def rinex_to_stec(self,station):
         ''' Extract the relevant data for tec calculation from observation and navigation
             Compute STEC of pseudo range and code phase
@@ -481,9 +432,9 @@ class tec:
         
         list_f_obs = self.dict_f_obs[station]
 
-
         for f_obs in list_f_obs:
             print (f_obs)
+
             try:
                 rfile = rx.rinex(f_obs)
                 header = rfile.read_header()
@@ -493,8 +444,9 @@ class tec:
             self.coord = header['position']
             list_df_f_obs = rfile.read_data()
             #try: list_df_f_obs = rfile.read_data()
-            #except:
+            #except Exception as e:
             #    print ("PROBLEM READING ",f_obs)
+            #    print (e)
             #    continue
         
             for const, df in list_df_f_obs.items():
@@ -502,7 +454,8 @@ class tec:
                 if const in self.list_df.keys():
                     self.list_df[const] = pd.concat([self.list_df[const],df])
                 else:
-                    self.list_df[const] = df.copy()
+                    self.list_df[const] = df
+
 
         #const_to_del = []
         #for k in self.list_df.keys():
@@ -538,11 +491,13 @@ class tec:
                 
                 self.list_df[const]['STEC_l'] = (self.list_df[const][L1]*self.gps_lambda1-self.list_df[const][L2]*self.gps_lambda2)*self.gps_alpha/1e16
                 self.list_df[const]['STEC_p'] = (self.list_df[const][C2]-self.list_df[const][C1])*self.gps_alpha/1e16
-    
+
+                self.list_df[const] = self.list_df[const][['sv',"STEC_l","STEC_p"]]
+                self.list_df[const] = self.list_df[const].dropna(subset=["STEC_l","STEC_p"])
+                
                 self.list_df[const]["C1"] = chan["C1"]
                 self.list_df[const]["C2"] = chan["C2"]
                 
-                self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
 
             else: del self.list[const]
 
@@ -625,6 +580,7 @@ class tec:
                     self.t_min[const] = min(self.list_df[const].index)
                     self.t_max[const] = max(self.list_df[const].index)
             else: del self.list_df[const]
+
  
         ## GALILEO
         if "E" in self.list_df.keys():
@@ -670,7 +626,7 @@ class tec:
                 self.list_df[const]["C2"] = chan["C2"]
                 self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
                 #self.list_df['E'].dropna(inplace=True)
-                self.list_df[const].dropna(subset=["STEC_l"],inplace=True)
+                self.list_df[const] = self.list_df[const].dropna(subset=["STEC_l","STEC_p"])
                 
                 self.t_min[const] = min(self.list_df[const].index)
                 self.t_max[const] = max(self.list_df[const].index)
@@ -692,7 +648,7 @@ class tec:
             bds_lambda2 = csts.c/bds_f2
             bds_lambda3 = csts.c/bds_f3
            
-            beidu_columns = self.list_df["C"].columns
+            beidu_columns = self.list_df[const].columns
             beidu_alpha_1 = (bds_f1**2*bds_f2**2/(bds_f1**2-bds_f2**2)/40.318)/1e16
             beidu_alpha_2 = (bds_f1**2*bds_f3**2/(bds_f1**2-bds_f3**2)/40.318)/1e16
             beidu_alpha_3 = (bds_f2**2*bds_f3**2/(bds_f2**2-bds_f3**2)/40.318)/1e16
@@ -787,6 +743,7 @@ class tec:
                 self.list_df[const]["STEC_p"] = (self.list_df[const][C2]-self.list_df[const][C1])*qzss_alpha/1e16
                 self.list_df[const]["C1"] = chan["C1"]
                 self.list_df[const]["C2"] = chan["C2"]
+                self.list_df[const].dropna(subset=["STEC_l","STEC_p"],inplace=True)
                 self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
 
                 self.t_min[const] = min(self.list_df[const].index)
@@ -800,9 +757,15 @@ class tec:
         if "S" in self.list_df.keys():
 
             const = "S"
+            list_columns=self.list_df[const]
             C1, C2, L1, L2 = 'C1C', 'C5I', 'L1C', 'L5I'
+            chan = {}
+            if (C1 in list_columns) \
+                    and (C2 in list_columns)\
+                    and (L1 in list_columns)\
+                    and (L2 in list_columns):
 
-            chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
+                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
 
             if chan:
 
@@ -823,8 +786,18 @@ class tec:
 
             else: del self.list_df[const]
 
+        #print ("Just loaded all obs rinex")
+        #process = psutil.Process(os.getpid())
+        #mem = process.memory_info()
+        #print(f"RSS: {mem.rss / 1024**2:.2f} MB")
+        #print(f"VMS: {mem.vms / 1024**2:.2f} MB")
+
+        #for const in self.list_df.keys(): print(f"list_df[{const}]: {sys.getsizeof(self.list_df[const])/ 1024**2:.2f} MB")
+
+
         # List satellites seen by the station and prepare dict of list_borders
         const_to_del = []
+
         
         for const in self.list_df.keys():
             if len(self.list_df[const])==0:
@@ -841,6 +814,17 @@ class tec:
             del self.list_df[const]
             del self.channels[const]
 
+        for const in self.list_df.keys():
+            self.list_df[const]=self.list_df[const].groupby(["sv","C1","C2"]).resample("1min").agg({"STEC_l": "mean","STEC_p": "mean"}).reset_index().set_index('time').dropna(subset=['STEC_l','STEC_p'])
+            #self.list_df[const] = (
+            #        self.list_df[const]
+            #            .groupby(["sv","C1","C2"])
+            #            .resample("1min")
+            #            .mean()              # aggregation for numeric columns
+            #            .reset_index()
+            #        ).set_index('time')
+            #print (self.list_df[const])
+
         #const_to_del = []
         #for const in self.list_df.keys():
         #    if const=='C': continue
@@ -852,24 +836,36 @@ class tec:
  
         return True
 
-
     def add_satellite_pos(self):
         const_without_pos = []
         
         for const in self.list_df.keys():
 
-            self.gnss.load_sats(const,self.t_min[const],self.t_max[const])            
             self.list_df[const] = self.gnss.getElevation(self.list_df[const],self.coord)
-            self.list_df[const].dropna(subset="elevation",inplace=True)
+
+            #self.list_df[const].dropna(subset="elevation",inplace=True)
+            self.list_df[const] = self.list_df[const][self.list_df[const]["elevation"]>0]
+            if len(self.list_df[const])==0: 
+                const_without_pos.append(const)
+                print ("remove const ", const)
+                continue
+
             self.list_df[const] = self.gnss.getPiercingPoint(self.list_df[const],self.coord,self.h)            
-            self.list_df[const].dropna(subset="elevation",inplace=True)
+
+           # print ("dropna elevation")
+           # self.list_df[const].dropna(subset="elevation",inplace=True)
+           # process = psutil.Process(os.getpid())
+           # mem = process.memory_info()
+           # print(f"RSS: {mem.rss / 1024**2:.2f} MB")
+           # print(f"VMS: {mem.vms / 1024**2:.2f} MB")
+           # print(f"list_df[{const}]: {sys.getsizeof(self.list_df[const])/ 1024**2:.2f} MB")
+
             self.list_df[const] = self.list_df[const][["sv","C1","C2","elevation","lat","lon","alt","STEC_l","STEC_p"]]
                         
         for const in const_without_pos:
             del self.list_df[const]
-            del self.channels[const]
+            if const in self.channels.keys(): del self.channels[const]
         return True
-
 
     def list_leaps_series(self,series,tol_dev=0.2,tol_sig=10,N_=5,debug=False):
         ''' detects leaps in the STEC_sl time series
@@ -1043,6 +1039,7 @@ class tec:
             if "STEC_p" in c: 
                 stec_p=c
                 #break
+
         borders_sl = self.list_leaps_series(df[stec_l],0.4,3,3,debug=False)
         borders_slp = self.list_leaps_series(df[stec_p],100,150,5,debug=False)
 
@@ -1084,10 +1081,9 @@ class tec:
 
         for const, df_data in self.list_df.items():
 
-            df_data = df_data.dropna(subset=["elevation"])
-            
             if len(df_data)==0: continue
-            
+
+            df_data = df_data.dropna(subset=["elevation"])
 
             t_begin = df_data.index[0]
             t_end = df_data.index[-1]
@@ -1103,7 +1099,6 @@ class tec:
 
                 for channel in self.channels[const]:
 
-                    
                     chan_filter = (df_sat["C1"]==channel["C1"]) & (df_sat["C2"]==channel["C2"])
                     df_sat_chanel = df_sat[chan_filter]
 
@@ -1327,7 +1322,6 @@ class tec:
             if const!='S':
                 self.list_df[const]["STEC_l"] += self.list_df[const]["dcb"]
                 self.list_df[const]["VTEC"]=self.list_df[const]["STEC_l"]*self.list_df[const]['cos_chi']
- 
     
     def compute_receiver_bias(self,resolution=datetime.timedelta(days=1)):
         ''' Sylvain Blunier 06/2021 v1.0.0
@@ -1380,7 +1374,6 @@ class tec:
             df_br_stored = df_br_stored[df_br_stored.index!=self.station]
             self.df_br = pd.concat([df_br_stored,self.df_br])
         self.df_br.to_csv(f_br)
-        
 
     def add_receiver_bias(self):
         self.compute_receiver_bias()
@@ -1401,18 +1394,13 @@ class tec:
 
             self.list_df[const] = self.list_df[const].groupby(by=["time","sv"],as_index=False).mean()
 
-        
-
     def load_sat_DCB(self):
-
         if len(self.list_f_dcb)==0: return pd.DataFrame()
         else:
             self.sat_dcb = DCB.load_dcb(self.list_f_dcb)
             return
         
-
     def to_feather(self):
-
         df_obs = pd.DataFrame()
 
         for const in self.list_df.keys():
@@ -1423,16 +1411,16 @@ class tec:
             
 
         feather_path = st.root_dir + "TEC/" + self.station
-        df_obs.to_csv(feather_path+".csv")
-        
+        df_obs.to_feather(feather_path+".feather")
     
     def compute_vtec(self,station):	
-
         self.list_df = {}
         self.channels = {}
      
+        print ("RINEX to STEC")
         self.rinex_to_stec(station)
         
+        print ("Add satellite position")
         self.add_satellite_pos()
         
         print ("Calculating baseline to correct Slant TEC")
@@ -1440,7 +1428,17 @@ class tec:
 
         print ("Calculating receiver bias, correct Slant TEC, compute VTEC")
         self.add_receiver_bias()
+
+        df_obs = pd.DataFrame()
+
+        for const in self.list_df.keys():
+            df_obs = pd.concat([
+                df_obs,
+                self.list_df[const]
+            ])
+
+        return df_obs
         
         #self.to_feather(st.root_dir + "TEC/" + str(self.year) + "/" + self.station + ".feather" )
-        self.to_feather()
+        #self.to_feather()
     

@@ -165,6 +165,8 @@ def download_dcb(
     #if isinstance(dt, datetime):
     #    dt = dt.date()
     url, filename = _dcb_path(dt)
+    dcb_file = dest_dir+filename.replace(".Z","")
+    if os.path.exists(dcb_file): return dcb_file 
     #dcb_Z = download_file(url, filename, dest_dir)
     dcb_Z = _ftp_download_file(url, filename, dest_dir)
 
