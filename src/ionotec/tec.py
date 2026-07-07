@@ -841,13 +841,14 @@ class tec:
         
         for const in self.list_df.keys():
 
+            
             self.list_df[const] = self.gnss.getElevation(self.list_df[const],self.coord)
-
+            
             #self.list_df[const].dropna(subset="elevation",inplace=True)
             self.list_df[const] = self.list_df[const][self.list_df[const]["elevation"]>0]
             if len(self.list_df[const])==0: 
                 const_without_pos.append(const)
-                print ("remove const ", const)
+                print ("remove constellation ", const)
                 continue
 
             self.list_df[const] = self.gnss.getPiercingPoint(self.list_df[const],self.coord,self.h)            

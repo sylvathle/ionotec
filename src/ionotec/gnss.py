@@ -419,7 +419,7 @@ class gnss:
 
 
         for f_rinex_nav in self.list_f_rinex_nav:
-            
+
             if f_rinex_nav.name in dict_file_processed['files']: continue
 
             try: nav = rx.rinex(str(f_rinex_nav))
@@ -456,6 +456,7 @@ class gnss:
             date = df_nav.index[int(len(df_nav)/2)].date()
             
             df_nav.sort_index(ascending=True,inplace=True)
+            #df_nav['file'] = f_rinex_nav.name
             self.df_nav_gnss[svtype] = pd.concat([self.df_nav_gnss[svtype],df_nav])
 
         min_date = self.datemin.replace(second=0, microsecond=0)
@@ -469,6 +470,10 @@ class gnss:
         while t<max_date:
             time_list.append(t)
             t = t+datetime.timedelta(seconds=self.resolution)
+
+        #self.df_nav_gnss['G'].to_csv("df_nav_gnss.csv")
+        #sys.exit()
+        
 
         for const in self.df_nav_gnss.keys():
             if (len(self.df_nav_gnss[const])<=2): continue
@@ -576,6 +581,8 @@ class gnss:
             sat_file = fgnss.name
             split_sat = sat_file.split(".")
 
+
+
             if split_sat[-1]!="feather": continue
             sat = split_sat[0]
             
@@ -583,12 +590,12 @@ class gnss:
     
             self.dict_df_pos[sat].index = pd.to_datetime(self.dict_df_pos[sat].index)
             #print(f"dict_df_pos[{sat}]: {sys.getsizeof(self.dict_df_pos[sat])/ 1024**2:.2f} MB, len(dict_df_pos[{sat}])={len(self.dict_df_pos[sat])}")
-            tot_mem_gnss_loaded += sys.getsizeof(self.dict_df_pos[sat])
+            #tot_mem_gnss_loaded += sys.getsizeof(self.dict_df_pos[sat])
 
             mask = (self.dict_df_pos[sat].index>=self.datemin) & (self.dict_df_pos[sat].index<=self.datemax)
             self.dict_df_pos[sat]=self.dict_df_pos[sat].loc[mask]
 
-            tot_mem_gnss += sys.getsizeof(self.dict_df_pos[sat])
+            #tot_mem_gnss += sys.getsizeof(self.dict_df_pos[sat])
 
 
             if first:
@@ -633,7 +640,6 @@ class gnss:
             
             self.dict_df_pos[sat] = pd.read_feather(sat_path)
 
-
             self.dict_df_pos[sat].index = pd.to_datetime(self.dict_df_pos[sat].index)
             mask = (self.dict_df_pos[sat].index>=d_in) & (self.dict_df_pos[sat].index<=d_out)
             self.dict_df_pos[sat]=self.dict_df_pos[sat].loc[mask]
@@ -654,7 +660,6 @@ class gnss:
     def getElevation(self,df,pos_antena):
 
         norm_antena = np.linalg.norm(pos_antena)
-
 
         
         dfdif = pd.DataFrame() 
