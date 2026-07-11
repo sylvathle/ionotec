@@ -343,7 +343,7 @@ class rinex:
         
         while self.line:
             self.line = self.file.readline() 
-            if self.line[0]=='>': 
+            if (len(self.line)>0) and (self.line[0]=='>'): 
                 print ("LEAVE FOR FILE for restarting hatanaka '>' at beginning of file")
                 #self.file.close()
                 break
@@ -351,7 +351,6 @@ class rinex:
             ## Do not support when hatanaka is reseted
             ##   See /bodega1/TEC/RINEX/IGS/2024/130/24d/MAO000USA_R_20241300000_01D_30S_MO.crx
             data_head_line = merge_str(data_head_line,self.line.replace("&","0"))
-            print (data_head_line)
             d,nsat,list_sats = process_head_data_line(data_head_line)
 
             #print (d)
