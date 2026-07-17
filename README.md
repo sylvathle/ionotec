@@ -38,6 +38,8 @@ To load the ionotec module, do:
 
 ### Defining input data
 
+The dev branch is now quite different from this version.
+
 Computing VTEC requires having the following elements:
 
 1. A list Rinex observation file
