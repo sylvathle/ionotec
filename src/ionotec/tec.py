@@ -62,6 +62,10 @@ from . import DCB
 
 import warnings
 
+from pathlib import Path
+
+
+
 pd.options.mode.chained_assignment = None
 
 # Earth Radius
@@ -104,6 +108,7 @@ def tleft(border):
     return border["t_left"]
 
 
+'''
 def filter_slope_leap(list_borders,series,diffs):
     list_borders.sort(key=tleft)
     #return list_borders
@@ -133,9 +138,69 @@ def filter_slope_leap(list_borders,series,diffs):
         else:
             i+=1
     return list_borders
+'''
+
+def filter_slope_leap(list_borders, series, diffs):
+    # --- Step 1: order segments chronologically ---
+    list_borders.sort(key=tleft)
+
+    # --- Step 2: resolve overlaps between consecutive segments ---
+    # If segment i+1 starts before (or exactly where) segment i ends,
+    # push its left edge to just after segment i's right edge.
+    for i in range(len(list_borders) - 1):
+        if list_borders[i + 1]["left"] <= list_borders[i]["right"]:
+            list_borders[i + 1]["left"] = list_borders[i]["right"] + 1
+            list_borders[i + 1]["t_left"] = series.index[list_borders[i]["right"] + 1]
 
 
-def plot_leap(diffs,series,s,A,B,N,borders,title=""):
+    # --- Step 3: drop degenerate / too-short segments ---
+    i = 0
+    while i < len(list_borders):
+        # duration under 3 minutes
+        t_short_segment = abs((list_borders[i]["t_right"] - list_borders[i]["t_left"]).seconds) < 3 * 60
+        # fewer than 6 samples
+        short_segment = list_borders[i]["right"] - list_borders[i]["left"] < 6
+        # t_right earlier than t_left (invalid/negative duration, can happen after Step 2's shift)
+        negative_segment = list_borders[i]["t_right"] < list_borders[i]["t_left"]
+
+        if t_short_segment or negative_segment or short_segment:
+            list_borders.pop(i)          # drop it, don't advance i (next element shifts into this slot)
+        else:
+            i += 1
+
+    # --- Step 4: drop segments whose slope doesn't stand out from both neighbors ---
+    # Skips the first and last segment (i starts at 1, stops before len-1),
+    # since those have no left/right neighbor respectively to compare against.
+    i = 1
+    while i < len(list_borders) - 1:
+        # only re-examine segments short enough to plausibly be a spurious leap (<30 min)
+        if (list_borders[i]["t_right"] - list_borders[i]["t_left"]).seconds > 30 * 60:
+            i += 1
+            continue
+
+        # fit a line to diffs vs. series values over this segment
+        # A = slope, B = intercept, M/m = max/min (unused here, but returned by fit_lin)
+        A, B, M, m = fit_lin(
+            diffs[list_borders[i]["left"]:list_borders[i]["right"]],
+            series[list_borders[i]["left"]:list_borders[i]["right"]].values,
+        )
+
+        # only compare if both neighbors already have a computed slope
+        #if not (list_borders[i - 1]["right_A"] is None or list_borders[i + 1]["left_A"] is None):
+        #    # if this segment's slope differs meaningfully from BOTH neighbors,
+        #    # it's likely a spurious leap -> drop it
+        #    if abs(A - list_borders[i - 1]["right_A"]) > 0.02 and abs(list_borders[i + 1]["left_A"] - A) > 0.02:
+        #        print ('Second pop', list_borders[i - 1]["right_A"] , list_borders[i + 1]["left_A"]  , A - list_borders[i - 1]["right_A"],list_borders[i + 1]["left_A"] - A)
+        #        list_borders.pop(i)
+        #    else:
+        #        i += 1
+        #else:
+        #    i += 1
+        i += 1
+    return list_borders
+
+
+'''def plot_leap(diffs,series,s,A,B,N,borders,title=""):
     fig, ax = plt.subplots(1,figsize=(10,7))
     xx = np.array(diffs[s:s+N])
     yy = A*xx+B
@@ -174,7 +239,7 @@ def plot_leap(diffs,series,s,A,B,N,borders,title=""):
 
     plt.show()
     plt.close()
-
+'''
 
 def process_br(df,h):
     # Coefficients of the quadratic error function that will be computed
@@ -224,7 +289,6 @@ def process_br(df,h):
     br = b/a
     return br
 
-from pathlib import Path
 
 
 
@@ -242,7 +306,8 @@ class tec:
     dcb_extensions = ['BSX','BIA','DCB']
     nav_extension = ['n', 'g', 'h', 'rnx']
     obs_extension = ['crx', 'd', 'o']
-    
+
+    folder_debug = 'debug/'
 
     dict_f_obs = {}
     list_f_nav = []
@@ -457,12 +522,13 @@ class tec:
                     self.list_df[const] = df
 
 
-        #const_to_del = []
-        #for k in self.list_df.keys():
-        #    if k=="S": continue
-        #    const_to_del.append(k)
-        #for const in const_to_del:
-        #    del self.list_df[const]
+        const_to_del = []
+        for k in self.list_df.keys():
+            if k=="C": continue
+            const_to_del.append(k)
+        for const in const_to_del:
+            del self.list_df[const]
+            
         
         ### GPS
         if 'G' in self.list_df.keys():
@@ -492,7 +558,7 @@ class tec:
                 self.list_df[const]['STEC_l'] = (self.list_df[const][L1]*self.gps_lambda1-self.list_df[const][L2]*self.gps_lambda2)*self.gps_alpha/1e16
                 self.list_df[const]['STEC_p'] = (self.list_df[const][C2]-self.list_df[const][C1])*self.gps_alpha/1e16
 
-                self.list_df[const] = self.list_df[const][['sv',"STEC_l","STEC_p"]]
+                #self.list_df[const] = self.list_df[const][['sv',"STEC_l","STEC_p"]]
                 self.list_df[const] = self.list_df[const].dropna(subset=["STEC_l","STEC_p"])
                 
                 self.list_df[const]["C1"] = chan["C1"]
@@ -576,7 +642,7 @@ class tec:
                 if len(self.list_df[const])!=0:
                     self.list_df[const]["C1"] = chan["C1"]
                     self.list_df[const]["C2"] = chan["C2"]
-                    self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
+                    #self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
                     self.t_min[const] = min(self.list_df[const].index)
                     self.t_max[const] = max(self.list_df[const].index)
             else: del self.list_df[const]
@@ -668,6 +734,7 @@ class tec:
                 df_beidu_2_7 = self.list_df[const].copy()
                 df_beidu_2_7["C1"] = chan["C1"]
                 df_beidu_2_7["C2"] = chan["C2"]
+                df_beidu_2_7.rename(columns={'S2I':'S1', 'S7I':'S2'},inplace=True)
                 df_beidu_2_7["STEC_l"] = (df_beidu_2_7[L1]*bds_lambda1-df_beidu_2_7[L2]*bds_lambda2)*beidu_alpha_1
                 df_beidu_2_7["STEC_p"] = (df_beidu_2_7[C2]-df_beidu_2_7[C1])*beidu_alpha_1
                 df_beidu_2_7.dropna(subset="STEC_l",inplace=True)
@@ -681,6 +748,7 @@ class tec:
                 df_beidu_2_6 = self.list_df[const].copy()
                 df_beidu_2_6["C1"] = chan["C1"]
                 df_beidu_2_6["C2"] = chan["C2"]
+                df_beidu_2_6.rename(columns={'S2I':'S1', 'S6I':'S2'},inplace=True)
                 df_beidu_2_6["STEC_l"] = (df_beidu_2_6[L1]*bds_lambda1-df_beidu_2_6[L2]*bds_lambda3)*beidu_alpha_2
                 df_beidu_2_6["STEC_p"] = (df_beidu_2_6[C2]-df_beidu_2_6[C1])*beidu_alpha_2
                 df_beidu_2_6.dropna(subset="STEC_l",inplace=True)
@@ -694,9 +762,9 @@ class tec:
 
             if len(self.list_df[const])!=0:
                 self.list_df[const].set_index("time",inplace=True)
-                self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
-                self.list_df[const].dropna(subset="STEC_l",inplace=True)
-            
+                #print (self.list_df[const])
+                self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
+                self.list_df[const].dropna(subset="STEC_l",inplace=True)         
                 self.t_min[const] = min(self.list_df[const].index)
                 self.t_max[const] = max(self.list_df[const].index)
             else:
@@ -794,10 +862,8 @@ class tec:
 
         #for const in self.list_df.keys(): print(f"list_df[{const}]: {sys.getsizeof(self.list_df[const])/ 1024**2:.2f} MB")
 
-
         # List satellites seen by the station and prepare dict of list_borders
         const_to_del = []
-
         
         for const in self.list_df.keys():
             if len(self.list_df[const])==0:
@@ -808,14 +874,18 @@ class tec:
                 if s not in self.sv:
                     self.sv.append(s)
                     self.borders[s]=[]
+                            
 
         # Remove constellation that have no data
         for const in const_to_del:
             del self.list_df[const]
             del self.channels[const]
 
+        dict_oper = {"S1": "mean", "S2": "mean", "STEC_l": "mean","STEC_p": "mean"}
         for const in self.list_df.keys():
-            self.list_df[const]=self.list_df[const].groupby(["sv","C1","C2"]).resample("1min").agg({"STEC_l": "mean","STEC_p": "mean"}).reset_index().set_index('time').dropna(subset=['STEC_l','STEC_p'])
+            #self.list_df[const]=self.list_df[const].groupby(["sv","C1","C2"]).resample("1min").agg({"STEC_l": "mean","STEC_p": "mean"}).reset_index().set_index('time').dropna(subset=['STEC_l','STEC_p'])
+            self.list_df[const]=self.list_df[const].groupby(["sv","C1","C2"]).resample("1min").agg(dict_oper).reset_index().set_index('time').dropna(subset=['STEC_l','STEC_p'])
+            
             #self.list_df[const] = (
             #        self.list_df[const]
             #            .groupby(["sv","C1","C2"])
@@ -841,14 +911,13 @@ class tec:
         
         for const in self.list_df.keys():
 
-            
             self.list_df[const] = self.gnss.getElevation(self.list_df[const],self.coord)
             
             #self.list_df[const].dropna(subset="elevation",inplace=True)
             self.list_df[const] = self.list_df[const][self.list_df[const]["elevation"]>0]
+            
             if len(self.list_df[const])==0: 
                 const_without_pos.append(const)
-                print ("remove constellation ", const)
                 continue
 
             self.list_df[const] = self.gnss.getPiercingPoint(self.list_df[const],self.coord,self.h)            
@@ -861,19 +930,16 @@ class tec:
            # print(f"VMS: {mem.vms / 1024**2:.2f} MB")
            # print(f"list_df[{const}]: {sys.getsizeof(self.list_df[const])/ 1024**2:.2f} MB")
 
-            self.list_df[const] = self.list_df[const][["sv","C1","C2","elevation","lat","lon","alt","STEC_l","STEC_p"]]
+            self.list_df[const] = self.list_df[const][["sv","C1","C2","elevation","lat","lon","alt","S1","S2","STEC_l","STEC_p"]]
                         
         for const in const_without_pos:
             del self.list_df[const]
             if const in self.channels.keys(): del self.channels[const]
         return True
 
+
     def list_leaps_series(self,series,tol_dev=0.2,tol_sig=10,N_=5,debug=False):
-        ''' detects leaps in the STEC_sl time series
-            input: Data pandas Series indexes with time
-            output: list of dictionnaries
-                Each dictionary contains first and last date of time series without leap
-        '''
+       
 
         #Remove nan data in series
         series.dropna(inplace=True)
@@ -886,92 +952,81 @@ class tec:
         N=N_
 
         tol_deviation=tol_dev*self.resolution
-
+        
 
         # List time in seconds from first index of series
         diffs = [0]
         for i in range(len(series)-1):
             diffs.append(diffs[-1]+(series.index[i+1]-series.index[i]).seconds)
 
-        s=0
+        
 
         list_fit_params = {}
 
         unstable_left=True
 
         list_series = series.tolist()
-        
+                
+        s=0
         while s<len(list_series)-N:
-
-            #Going for N next point without big jump
-            if False:
-                has_big_time_jump=True
-                while has_big_time_jump and s<len(series)-N:
-                    for i in range(N-1):
-                        if diffs[s+1+i]-diffs[s+i]>2*60:
-                            print ("TIME JUMP")
-                            if not border["left"] is None:
-                                border["right"]=s+i
-                                list_borders.append(border)
-                                border={"left":None,"right":None,"left_A":None,"left_B":None,"right_A":None,"right_B":None}
-                                unstable_left=True
-                            s=s+1
-                            break
-                        has_big_time_jump=False
-
-            #Get linear fit parameter of N right points
             A,B,max_dev,mean_dev = fit_lin(diffs[s:s+N],series[s:s+N].values)
             # Compute distance of point s and s+N+1 with fit
-            left_dev=abs(list_series[s-1]-A*diffs[s-1]-B) if s>0 else None
-
-            right_dev=abs(list_series[s+N]-A*diffs[s+N]-B) if s+N<len(series) else None
-            list_fit_params[s]={"A":A,"B":B,"max_dev":max_dev,"left_dev":left_dev,"right_dev":right_dev}
+            left_dev=float(abs(list_series[s-1]-A*diffs[s-1]-B)) if s>0 else 0
+            right_dev=float(abs(list_series[s+N]-A*diffs[s+N]-B)) #if s+N<len(series) else 0
+            #list_fit_params[s]={"A":float(A),"B":float(B),"max_dev":float(max_dev),"left_dev":float(left_dev),"right_dev":float(right_dev)}
+            list_fit_params[s]={"A":round(float(A),2),"B":round(float(B),2),"max_dev":round(float(max_dev),2),"left_dev":round(float(left_dev),2),"right_dev":round(float(right_dev),2)}
             s+=1
-
+        
 
         border={"left":None,"t_left":None,"right":None,"t_right":None,"left_A":None,"left_B":None,"right_A":None,"right_B":None}
+
 
         retroactive_borders = []
 
         s1=0
         s2=0
+        oldest_left_border = 0
         while s1<len(series):
             # Looking for an right border
+            #print (s1,s2,indices[s1].strftime('%y-%m-%d %H:%M'),indices[s2].strftime('%y-%m-%d %H:%M'),oldest_left_border)
+            #print ('\t',border)
             if border["right"] is None:
                 if s1>=len(series)-N+1:
-                    if debug:
-                        print ("RIGHT",s1,series.index[s1],len(series),list_fit_params[s1]["left_dev"],list_fit_params[s1]["right_dev"],tol_dev)
-                        plot_leap(diffs,series,s1-N,list_fit_params[s1-N]["A"],list_fit_params[s1-N]["B"],N,list_borders,"forward")
-                    list_borders = filter_slope_leap(list_borders,series,diffs)
+                    print (indices[s1].strftime('%H:%M'),indices[s2].strftime('%H:%M'),'RETURN list_borders',border)
+                    #list_borders = filter_slope_leap(list_borders,series,diffs)
                     return list_borders
-                    #return list_borders
+
                 if s1==len(series)-N:
+                    
                     border["right"]=s1+N-1
                     border["t_right"]=series.index[s1+N-1]
                     border["right_A"]=list_fit_params[s1-1]["A"]
                     border["right_B"]=list_fit_params[s1-1]["B"]
-
+                    if border['left']==None:
+                        border['left']=oldest_left_border
+                        border['t_left']=series.index[oldest_left_border]
+                        border['left_A']=list_fit_params[oldest_left_border]["A"]
+                        border['left_B']=list_fit_params[oldest_left_border]["B"]
+                        list_borders.append(border)
+                    print (indices[s1].strftime('%H:%M'),indices[s2].strftime('%H:%M'),'s1==len(series)-N',border)
                     s2=s1-1
                 elif list_fit_params[s1]["right_dev"]>tol_deviation or (list_fit_params[s1]["right_dev"]>tol_sig*list_fit_params[s1]["max_dev"] and list_fit_params[s1]["right_dev"]>0.04*self.resolution):
-                    if debug:
-                        if s1>=0:
-                            print ("RIGHT",s1,series.index[s1],len(series),list_fit_params[s1]["left_dev"],list_fit_params[s1]["right_dev"],tol_dev)
-                            plot_leap(diffs,series,s1,list_fit_params[s1]["A"],list_fit_params[s1]["B"],N,list_borders)
+                    
+                    
                     border["right"]=s1+N-1
                     border["t_right"]=series.index[s1+N-1]
                     if s1!=0:
                         border["right_A"]=list_fit_params[s1]["A"]
                         border["right_B"]=list_fit_params[s1]["B"]
+                    print (indices[s1].strftime('%H:%M'),indices[s2].strftime('%H:%M'), 'found gap, while border right is None',border)
                     s2=s1
                 else:
-                    if debug:
-                        if s1>=0: print ("RIGHT",s1-N,series.index[s1],len(series),list_fit_params[s1]["left_dev"],list_fit_params[s1]["right_dev"],tol_dev)
+                    print (indices[s1].strftime('%H:%M'),indices[s2].strftime('%H:%M'),'s1+1',border)
                     s1+=1
             else:
 
-                if debug:
-                    print ("LEFT",s2,series.index[s2],len(series),list_fit_params[s2]["left_dev"],list_fit_params[s2]["right_dev"],tol_dev)
-                    plot_leap(diffs,series,s2,list_fit_params[s2]["A"],list_fit_params[s2]["B"],N,list_borders)
+
+                print (s1)
                 ## Conditions for left border
                 # s2 cannot be negative, if at 0 this is a begining of segment
                 s2_null = s2==0
@@ -992,94 +1047,144 @@ class tec:
                     if border["right"]-s2<=N:
                         if len(retroactive_borders)!=0:
                             for b in retroactive_borders:
+                                #print ('   ',b['t_left'],b['t_right'])
+                                print ('Increment list border A',b)
                                 list_borders.append(b)
                             retroactive_borders=[]
                             #if debug: plot_leap(diffs,series,s2,list_fit_params[s2]["A"],list_fit_params[s2]["B"],N,list_borders,"forward")
 
                         border={"left":None,"t_left":None,"right":None,"t_right":None,"left_A":None,"left_B":None,"right_A":None,"right_B":None}
+                        print (indices[s1].strftime('%H:%M'),indices[s2].strftime('%H:%M'),'borderright-s2<=N',border)
                         s1=s1+N
                         continue
+                    
+                    ## Patch, for the case a left border was detected and leave a big segment behind that was healthy
+                    
+                    
+                    
                     border["left"]=s2
                     border["t_left"]=series.index[s2]
                     border["left_A"]=list_fit_params[s2]["A"]
                     border["left_B"]=list_fit_params[s2]["B"]
+
+                    print (indices[s1].strftime('%H:%M'),indices[s2].strftime('%H:%M'),'assing s2 to left',border)
+                    
                     retroactive_borders.append(border)
+                    if oldest_left_border<s2-N:
+                         
+                        border_left = {"left":oldest_left_border,"t_left":indices[oldest_left_border],"right":s2-2,
+                        		"t_right":indices[s2-2],"left_A":list_fit_params[oldest_left_border]["A"],"left_B":list_fit_params[oldest_left_border]["B"],
+                        		"right_A":list_fit_params[s2-2]["A"],"right_B":list_fit_params[s2-2]["B"]}
+                        retroactive_borders.append(border_left)
+                        print (indices[s1].strftime('%H:%M'),indices[s2].strftime('%H:%M'), 'Assign olders_left to left:', oldest_left_border,border)
+                    oldest_left_border = border["right"]+1
+                    
                     # If right border of last segment is not reached, must keep
                     # searching backward for a new segment
                     if len(list_borders)>0 and border["left"]-list_borders[-1]["right"]>N:
-                        if s2-1>=N:
+                        if s2-1>=N: 
                             border={"left":None,"t_left":None,"right":s2-1,"t_right":series.index[s2-1],"left_A":None,"left_B":None,"right_A":list_fit_params[s2-N]["A"],"right_B":list_fit_params[s2-N]["B"]}
+                            print (indices[s1].strftime('%H:%M'),indices[s2].strftime('%H:%M'),'Assign s2-N to right',border)
                         else:
                             border={"left":None,"t_left":None,"right":s2-1,"t_right":series.index[s2-1],"left_A":None,"left_B":None,"right_A":None,"right_B":None}
+                            print (indices[s1].strftime('%H:%M'),indices[s2].strftime('%H:%M'),'Assign s2-1 to right',border)
                         s2-=N
                         continue
                     retroactive_borders.reverse()
                     for b in retroactive_borders:
+                        #print ('   ',b['t_left'],b['t_right'])
+                        print ('Increment list border B',b)
                         list_borders.append(b)
                     retroactive_borders=[]
 
                     if s1>=len(series)-N-1:
-
-                        if debug:
-                            plot_leap(diffs,series,s2,list_fit_params[s2]["A"],list_fit_params[s2]["B"],N,list_borders)
-                        list_borders = filter_slope_leap(list_borders,series,diffs)
+                        #print ('HERE1')
+                        
+                        #list_borders = filter_slope_leap(list_borders,series,diffs)
+                        #print (list_borders)
+                        print ('return list_borders because right border has been found',indices[s1],indices[s2],border)
+                        for b in list_borders: print (b['t_left'],b['t_right'])
                         return list_borders
                     border={"left":None,"t_left":None,"right":None,"t_right":None,"left_A":None,"left_B":None,"right_A":None,"right_B":None}
                     s1=s1+N
                 else: s2-=1
-        list_borders = filter_slope_leap(list_borders,series,diffs)
+        
+        #print ('HERE2')
+        #list_borders = filter_slope_leap(list_borders,series,diffs)
+        print ('return, End of function')
+        for b in list_borders: print (b['t_left'],b['t_right'])
         return list_borders
 
-    def list_leaps(self,df):
-        borders=[]
-        stec_l = ''
-        stec_p = ''
-        for c in df.columns:
-            if "STEC_l" in c: 
-                stec_l=c
-            if "STEC_p" in c: 
-                stec_p=c
-                #break
 
-        borders_sl = self.list_leaps_series(df[stec_l],0.4,3,3,debug=False)
-        borders_slp = self.list_leaps_series(df[stec_p],100,150,5,debug=False)
+
+    def list_leaps(self,df):
+        #borders_l,borders_p=[],[]
+        #stec_l = ''
+        #stec_p = ''
+        #for c in df.columns:
+        #    if "STEC_l" in c: 
+        #        stec_l=c
+        #    if "STEC_p" in c: 
+        #        stec_p=c
+                #break
+                
+        #print ('sl')
+        borders_sl = self.list_leaps_series(df['STEC_l'],1/60,3,3,debug=False)
+        #for b in borders_sl: print (b['t_left'],b['t_right'])
+
+        borders_slp = self.list_leaps_series(df['STEC_p'],tol_dev=2.5/6.,tol_sig=6,N_=8,debug=False)
+        
+        #print (df)
+        print ('*******************************************')
+        print ('sl')
+        for bord in borders_sl: print (bord)
+        print ('*******************************************') 	
+        print ('slp')
+        for bord in borders_slp: print (bord)
+
+        sys.exit()
 
         # We look at the borders found for slp and sll leaps, and make the
         # match
         # For each border found for sll
-        if len(borders_sl)==0: return borders
-        for bsll in borders_sl:
-            # For each border found for slp
-            for bslp in borders_slp:
-                # Test if left border of sll in inside slp borders item
-                if bsll["t_left"]>=bslp["t_left"] and bsll["t_left"]<bslp["t_right"]:
-                    # Left of new border must be the one of bsll
-                    newb = bsll.copy()
-                    newb["t_left"]=bsll["t_left"]
-                    # We asign to the new border the earliest right border
-                    if bsll["t_right"]<bslp["t_right"]: newb["t_right"]=bsll["t_right"]
-                    else: newb["t_right"]=bslp["t_right"]
-                    borders.append(newb)
-                    break
-                # If last condition not fulfilled, test in the right sll border
-                # is inside the slp border item
-                elif bsll["t_right"]>bslp["t_left"] and bsll["t_right"]<=bslp["t_left"]:
-                    newb = bsll.copy()
-                    newb["t_right"]=bsll["t_right"]
-                    #Left border must be outside blsp, otherwise it would
-                    #have been seen by the previous condition
-                    newb["t_left"]=bslp["t_left"]
-                    borders.append(newb)
-                    break
-                # Case the bsll fully contains bslp, take bslp borders
-                elif bsll["t_left"]<bslp["t_left"] and bsll["t_right"]>bslp["t_right"]:
-                    borders.append(bslp)
-                    break
+        #if len(borders_sl)!=0:
+        #    for bsll in borders_sl:
+        #        # For each border found for slp
+        #        for bslp in borders_slp:
+        #            # Test if left border of sll in inside slp borders item
+        #            if bsll["t_left"]>=bslp["t_left"] and bsll["t_left"]<bslp["t_right"]:
+        #                # Left of new border must be the one of bsll
+        #                newb = bsll.copy()
+        #                newb["t_left"]=bsll["t_left"]
+        #                # We asign to the new border the earliest right border
+        #                if bsll["t_right"]<bslp["t_right"]: newb["t_right"]=bsll["t_right"]
+        #                else: newb["t_right"]=bslp["t_right"]
+        #                borders_l.append(newb)
+        #                break
+        #            # If last condition not fulfilled, test in the right sll border
+        #            # is inside the slp border item
+        #            elif bsll["t_right"]>bslp["t_left"] and bsll["t_right"]<=bslp["t_left"]:
+        #                newb = bsll.copy()
+        #                newb["t_right"]=bsll["t_right"]
+        #                #Left border must be outside blsp, otherwise it would
+        #                #have been seen by the previous condition
+        #                newb["t_left"]=bslp["t_left"]
+        #                borders_l.append(newb)
+        #                break
+        #            # Case the bsll fully contains bslp, take bslp borders
+        #            elif bsll["t_left"]<bslp["t_left"] and bsll["t_right"]>bslp["t_right"]:
+        #                borders_l.append(bslp)
+        #                break
+                    
 
-        return borders
+
+        return borders_sl,borders_slp
 
     def add_baseline(self):
-
+    
+        N_min_stec_p = 10
+        signal_strength_threshold = 38
+    
         for const, df_data in self.list_df.items():
 
             if len(df_data)==0: continue
@@ -1094,18 +1199,21 @@ class tec:
             list_sv = df_data["sv"].unique().tolist()
 
             for sat in list_sv:
+            
+                if sat!='C33': continue
+                print (sat)
+
 
                 df_sat = df_data[df_data["sv"]==sat]
                 df_sat_filter = pd.DataFrame()
 
                 for channel in self.channels[const]:
 
+                    if channel['C2']!='C6I': continue
                     chan_filter = (df_sat["C1"]==channel["C1"]) & (df_sat["C2"]==channel["C2"])
                     df_sat_chanel = df_sat[chan_filter]
-
                         
                     if len(df_sat_chanel["STEC_l"].dropna())==0: continue
-                    
 
                     # Make list of arcs of satellite using elevation information
                     elevations = df_sat_chanel["elevation"]
@@ -1113,108 +1221,414 @@ class tec:
 
                     # Squared of sin of elevation for baseline (Brs) pondering
                     df_sat_chanel["sin2_ele"] = np.sin(df_sat_chanel['elevation'])**2
+                    
 
                     # Individual values of the sum for future baseline calculation
-                    df_sat_chanel['BRs'] = (df_sat_chanel["STEC_p"]-df_sat_chanel["STEC_l"])*df_sat_chanel["sin2_ele"]
+                    #df_sat_chanel['BRs'] = (df_sat_chanel["STEC_p"]-df_sat_chanel["STEC_l"])*df_sat_chanel["sin2_ele"]
                     
                     # cos(chi) to calculate VTEC from STEC
                     df_sat_chanel['cos_chi'] = np.cos(np.arcsin(R_E*np.cos(df_sat_chanel["elevation"])/(R_E+self.h)))
                     n_arc=0
 
                     df_arcs = pd.DataFrame()
+                    iarc = 0
                     for arc in list_arcs:
-                      
+                        
+
+                    
+                        #if iarc==0: 
+                        #    iarc+=1
+                        #    continue
+                        arc_as_baseline = False
                         # Must gets borders that are inside the arc segment
-                        arc_borders = None
-                        arc_borders = []
+                        ##arc_borders = None
+                        #arc_borders = []
 
                         # Extract data from satellite arc
                         date_filter = (df_sat_chanel.index>=arc["start"]) & (df_sat_chanel.index<=arc["end"])
                         df_arc = df_sat_chanel[date_filter]
 
-                        if len(df_arc)<=8:continue                   
-                        arc_borders = self.list_leaps(df_arc)
+                        if len(df_arc)<=8:continue      
+                                     
+                        arc_borders_l, arc_borders_p = self.list_leaps(df_arc)
 
                         
+                        if (len(arc_borders_l)==0) or (len(arc_borders_p)==0): continue
                         
-                        if len(arc_borders)==0: continue
-        
-                        # Eliminate segments with too low elevation satellites
-                        list_max_ele = []
-                        i=0
-                        while i<len(arc_borders):
-                            t_dist=(arc_borders[i]["t_right"]-arc_borders[i]["t_left"]).seconds
-                            date_border_filter  = (df_arc.index>=arc_borders[i]["t_left"]) & (df_arc.index<=arc_borders[i]["t_right"])
-                            max_ele = max(df_arc[date_border_filter]["elevation"])
-                            #max_ele = max(df_arc.loc[arc_borders[i]["t_left"]:arc_borders[i]["t_right"]]["elevation"])
-                            if max_ele<30*np.pi/180 and t_dist<20*60:
-                                arc_borders.pop(i)
+                        list_diff_S1, list_diff_S2  = [], []
+                        
+                        date_border_filter  = (df_arc.index>=arc_borders_p[0]["t_left"]) & (df_arc.index<=arc_borders_p[0]["t_right"])
+                        df_border = df_arc[date_border_filter]
+                    
+                        signal_strength1 = (df_border['S1'] * df_border['sin2_ele']).sum() / df_border['sin2_ele'].sum()
+                        signal_strength2 = (df_border['S2'] * df_border['sin2_ele']).sum() / df_border['sin2_ele'].sum()
+                        
+                        was_signal_cancelled = False if (signal_strength1>signal_strength_threshold) and (signal_strength2>signal_strength_threshold) else True
+                        if was_signal_cancelled:
+                            df_arc.loc[arc_borders_p[0]["t_left"]:arc_borders_p[0]["t_right"], 'STEC_p'] = np.nan
+                        #print (df_arc.loc[arc_borders_p[0]["t_left"]:arc_borders_p[0]["t_right"], 'STEC_p'].tolist())
+                        
+                        has_baseline = True if was_signal_cancelled else False
+                        
+                        for i in range(1,len(arc_borders_p)):
+                            
+                            date_border_filter  = (df_arc.index>=arc_borders_p[i]["t_left"]) & (df_arc.index<=arc_borders_p[i]["t_right"])
+                            df_border = df_arc[date_border_filter]
+                            
+                            signal_strength1 = (df_border['S1'] * df_border['sin2_ele']).sum() / df_border['sin2_ele'].sum()
+                            signal_strength2 = (df_border['S2'] * df_border['sin2_ele']).sum() / df_border['sin2_ele'].sum()
+                            
+                            is_strong_signal_1 = True if (signal_strength1>signal_strength_threshold) and (signal_strength2>signal_strength_threshold) else False
+
+                            #dt = (df_arc.index[arc_borders_p[i+1]['left']] - df_arc.index[arc_borders_p[i]['right']]).seconds
+                            diff_S1 = df_arc['S1'].iloc[arc_borders_p[i]['left']] - df_arc['S1'].iloc[arc_borders_p[i-1]['right']]
+                            diff_S2 = df_arc['S2'].iloc[arc_borders_p[i]['left']] - df_arc['S2'].iloc[arc_borders_p[i-1]['right']]
+                            
+                            # If there is a drop in signal strength, regarless the signal strength, the segment that dropped is unreliable 
+                            if diff_S1<-5 or diff_S2<-5:
+                                iright = i+1 if i<len(arc_borders_p)-1 else i
+                                ileft = i-1 if i>0 else 0
+                                df_arc.loc[arc_borders_p[ileft]["t_right"]:arc_borders_p[iright]["t_left"], 'STEC_p'] = np.nan
+                                was_signal_cancelled=True
+
+                                
+                            # If there was no notorious drop, we look if the previous signal was cancelled
+                            #   if in addition there was no recovery, segment i is cancelled
+                            elif was_signal_cancelled:
+                                if is_strong_signal_1: 
+                                    was_signal_cancelled=False
+                                    has_baseline=True
+                                else:
+                                    iright = i+1 if i<len(arc_borders_p)-1 else i
+                                    ileft = i-1 if i>0 else 0
+                                    df_arc.loc[arc_borders_p[ileft]["t_right"]:arc_borders_p[iright]["t_left"], 'STEC_p'] = np.nan
+                                    was_signal_cancelled=True
                             else:
-                                i+=1
-                                list_max_ele.append(max_ele)
+                                has_baseline=True
 
+
+
+                        print (has_baseline)
+                        if not has_baseline: continue
+                            
+                            #print (diff_S1,diff_S2,was_signal_cancelled,is_strong_signal_1,signal_strength1,signal_strength2)
+                            #print (arc_borders_p[i]["t_left"],arc_borders_p[i]["t_right"])
+                            #print (df_arc.loc[arc_borders_p[i]["t_left"]:arc_borders_p[i]["t_right"], 'STEC_p'].tolist()[:10])
+                            
+                            #is_next_strong_signal = is_strong_signal
+
+                       #
+
+                            
+                            #print (signal_strength1,signal_strength2,border["t_left"],border["t_right"])
+                            
+                            #if (signal_strength1<40) or (signal_strength2<40):
+                            #    df_arc.loc[border["t_left"]:border["t_right"], 'STEC_p'] = np.nan
+                                
+                                
+                        #### Make a fit of STEC_p to detect deviations of STEC_l
+                        x = (df_arc.index - df_arc.index[0]).total_seconds()
+                        y = df_arc["STEC_p"].to_numpy()
+                        w = df_arc["sin2_ele"].to_numpy()
+
+                        # 1. Masque booléen pour exclure les NaN de y (et s'assurer que x et w sont valides)
+                        valid_mask = ~np.isnan(y) & ~np.isnan(x) & ~np.isnan(w)
+
+                        # 2. Filtrage des données pour le fit
+                        x_fit = x[valid_mask]
+                        y_fit = y[valid_mask]
+                        w_fit = w[valid_mask]
+
+                        # 3. Ajustement dynamique du degré basé sur le nombre de points VALIDES
+                        degree_fit = min(len(x_fit) - 1, 10)
+
+                        # 4. Calcul du fit si on a assez de points valides
+                        if degree_fit >= 0:
+                            try: 
+                                coeffs = np.polyfit(x_fit, y_fit, deg=degree_fit, w=w_fit)
+                            except: 
+                                print ('STEC_p fit did not work\n')
+                                continue
+                        else:
+                            print ('Not enough valid data points for fit for degree '+str(degree_fit)+' '+str(len(x))+' '+str(len(x_fit))+'\n')
+                            continue
+
+                        # 5. Évaluation sur l'axe 'x' complet (conserve les dimensions d'origine du DataFrame)
+                        poly = np.poly1d(coeffs)
+                        #df_arc["STEC_p_fit"] = poly(x)      
+                        df_arc.loc[valid_mask, "STEC_p_fit"] = poly(x_fit)                          
+
+                        sigma = (df_arc["STEC_p"] - df_arc["STEC_p_fit"]).std()
+
+                        if len(arc_borders_l)==0: continue
+
+        
                         #### Clasify segments #####
-                        d_df_seg = []
                         has_sane_parts = False
                         sane_indices = []
-                        list_size_segs = []
+                        #list_size_segs = []
+                        d_df_seg = []
+                        segment_anchored = []
 
-                        for i,b in enumerate(arc_borders):
-                            size_seg = (arc_borders[i]["t_right"]-arc_borders[i]["t_left"]).seconds
-                            list_size_segs.append(size_seg)
+                        list_pop_border = []
+
+
+                        i = 0
+                        while i<len(arc_borders_l):
+                            print (arc_borders_l[i])
+  
+                            date_border_filter  = (df_arc.index>=arc_borders_l[i]["t_left"]) & (df_arc.index<=arc_borders_l[i]["t_right"])
+                            df_seg = df_arc[date_border_filter]
+
+                            brs = None
+                            N_valid_STEC_p = len(df_seg['STEC_p'].dropna())
+                            #print (df_seg.index[0])
+                            if N_valid_STEC_p>N_min_stec_p:
+                                df_seg_br = df_seg.dropna(subset=['STEC_p'])
+                                df_seg_br['BRs'] = (df_seg_br["STEC_p"]-df_seg_br["STEC_l"])*df_seg_br["sin2_ele"]
+                                brs=df_seg_br['BRs'].sum(skipna=True)/df_seg_br["sin2_ele"].sum(skipna=True)
+                                #print (df_seg_br)
+                                df_seg['STEC_l'] = df_seg['STEC_l']+brs
+                                segment_anchored.append(True)
+                                #if (N_valid_STEC_p == len(df_seg['STEC_p'])) and (max(df_seg['STEC_l']-df_seg['STEC_p_fit'])>5*sigma): 
+                                #    df_seg["STEC_l"] = df_seg['STEC_p_fit']
+                            else:
+                                segment_anchored.append(False)
+
+                            if i>0 and segment_anchored[i-1] and segment_anchored[i]:
+                                d_df_seg[i-1] = pd.concat([d_df_seg[i-1],df_seg])
+                                arc_borders_l[i-1]['t_right'] = arc_borders_l[i]['t_right'] 
+                                arc_borders_l[i-1]['right_A'] = arc_borders_l[i]['right_A'] 
+                                arc_borders_l[i-1]['right_B'] = arc_borders_l[i]['right_B'] 
+                                arc_borders_l.pop(i)
+                                segment_anchored.pop(i)
+                                i = i-1
+                            else:
+                                d_df_seg.append(df_seg)
+                            i = i+1
+
+                        #i=1
+                        #while i<len(d_df_seg):
+                        #    d_df_seg[0] = pd.concat([d_df_seg[0],d_df_seg[i]])
+                        #    print (d_df_seg[0])
+                        #    d_df_seg.pop(i)
+                        #continue
+                        
+                        print (segment_anchored)
+                        for i in range(len(segment_anchored)):
+                            print (segment_anchored[i],arc_borders_l[i])
+                        # If no STEC_l segment could be anchored in STEC_p then there is nothing useful, go to next arc.
+                        if True not in segment_anchored: continue
+
+
+                        #if len(segment_anchored)<=1: continue 
+
+                        while len(d_df_seg)!=1:
+
+                            
+                        #for i in range(1,len(d_df_seg)):
+                            #print ('------------------------------------------')
+                            #print (i,segment_anchored[0],segment_anchored[1])
+                            #print (1,len(d_df_seg),len(segment_anchored))
+                            #print (d_df_seg[0][['STEC_l','STEC_p']])
+                            #print (d_df_seg[1][['STEC_l','STEC_p']])
+
+                            # Case segment i is anchored: we see if left neightbour need rescue
+                            if segment_anchored[1]:
+                                # Case left segment is NOT anchored (otherwise nothing to do)
+                                if not segment_anchored[0]:
+                                    #t_dist=(arc_borders_l[1]["t_right"]-arc_borders_l[0]["t_left"]).seconds
+                                    #slope = (arc_borders_l[1]["right_A"]+arc_borders_l[0]["left_A"])/2        
+                                    t_dist=(arc_borders_l[1]["t_left"]-arc_borders_l[0]["t_right"]).seconds
+                                    slope = (arc_borders_l[1]["left_A"]+arc_borders_l[0]["right_A"])/2        
+                                    glue=d_df_seg[1]["STEC_l"].iloc[0]-d_df_seg[0]["STEC_l"].iloc[-1]-slope*t_dist
+                                    d_df_seg[0]["STEC_l"] = d_df_seg[0]["STEC_l"] + glue
+                                    
+                                    #print ('0 1',t_dist,slope,glue)
+                                    #print (d_df_seg[0])
+                                    #print (d_df_seg[1])
+                                    #d_df_seg[0] = pd.concat([d_df_seg[0],d_df_seg[1]])
+                                    #d_df_seg.pop(i)
+                                    #arc_borders_l[i-1]['t_right'] = arc_borders_l[i]['t_right'] 
+                                    #arc_borders_l[i-1]['right_A'] = arc_borders_l[i]['right_A'] 
+                                    #arc_borders_l[i-1]['right_B'] = arc_borders_l[i]['right_B'] 
+                                    #arc_borders_l.pop(i)
+                                # if both segment are anchored they will be merged in one, then we remove 
+                                #   the one that says false which by definition is the first one
+                                segment_anchored.pop(0)
+
+
+                            # Case segment i is not anchored, we seek for help at the left, we paste anyway
+                            else:
+                                t_dist=(arc_borders_l[1]["t_left"]-arc_borders_l[0]["t_right"]).seconds
+                                slope = (arc_borders_l[1]["left_A"]+arc_borders_l[0]["right_A"])/2        
+                                glue=float(d_df_seg[1]["STEC_l"].iloc[0]-d_df_seg[0]["STEC_l"].iloc[-1]-slope*t_dist)
+                                #print ('d_df_seg[1]["STEC_l"].iloc[0]=  ',d_df_seg[1]["STEC_l"].iloc[0])
+                                #print ('d_df_seg[0]["STEC_l"].iloc[-1]=  ',d_df_seg[0]["STEC_l"].iloc[-1])
+                                #print ('slope = ',slope,'t_dist = ',t_dist,'glue = ',glue)
+                                
+                                # Case the left segment is anchored then the i segment must be shifted
+                                if segment_anchored[0]:
+                                    #print ('1 0',t_dist,slope,glue,type(glue))
+                                    #print (d_df_seg[0])
+                                    d_df_seg[1]["STEC_l"] = d_df_seg[1]["STEC_l"] - glue
+                                    #print (d_df_seg[1])
+                                else:
+                                    #print ('0 0',t_dist,slope,glue)
+                                    d_df_seg[0]["STEC_l"] = d_df_seg[0]["STEC_l"] + glue
+                                ## Here we remove the second bool, if both are not anchored we want false, 
+                                #   else we want to keep the true value from the first one
+                                segment_anchored.pop(1)
+
+                            d_df_seg[0] = pd.concat([d_df_seg[0],d_df_seg[1]])
+                            d_df_seg.pop(1)
+                            arc_borders_l[0]['t_right'] = arc_borders_l[1]['t_right'] 
+                            arc_borders_l[0]['right_A'] = arc_borders_l[1]['right_A'] 
+                            arc_borders_l[0]['right_B'] = arc_borders_l[1]['right_B'] 
+                            arc_borders_l.pop(1)
+
+
+
+                            #i = i-1
+                                
+                            #print (d_df_seg[0])
+
+                        
+                                
+
+
+
+
+                            
+
+
+
+                        '''
+                        for i,b in enumerate(arc_borders_l):
+                        
+                            size_seg = (arc_borders_l[i]["t_right"]-arc_borders_l[i]["t_left"]).seconds
+                            #list_size_segs.append(size_seg)
 
         
                             if size_seg>50*60:
                                 df_seg = None
-                                date_border_filter  = (df_arc.index>=arc_borders[i]["t_left"]) & (df_arc.index<=arc_borders[i]["t_right"])
+                                date_border_filter  = (df_arc.index>=arc_borders_l[i]["t_left"]) & (df_arc.index<=arc_borders_l[i]["t_right"])
                                 df_seg = df_arc[date_border_filter]
 
-                                df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
+                                #df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
 
-
-                                brs=df_br['BRs'].sum(skipna=True)/df_br["sin2_ele"].sum(skipna=True)
-                                df_seg["STEC_l"] = df_seg["STEC_l"] + brs
+                                #We take only long enough segments of STEC_p to trust the signal 
+                                # if not then we take STEC_l as it is 
+                                if len(df_seg['STEC_p'].dropna())>N_min_stec_p:
+                                    print ('Using baseline here 11',b['t_left'],b['t_right'])
+                                    arc_has_baseline = True
+                                    df_seg_br = df_seg.dropna(subset=['STEC_p'])
+                                    df_seg_br['BRs'] = (df_seg_br["STEC_p"]-df_seg_br["STEC_l"])*df_seg_br["sin2_ele"]
+                                    brs=df_seg_br['BRs'].sum(skipna=True)/df_seg_br["sin2_ele"].sum(skipna=True)
+                                    df_seg["STEC_l"] = df_seg["STEC_l"] +  brs
+                                    df_seg['diffSTEC'] = df_seg['STEC_l']-df_seg['STEC_p_fit']
+                                    ## In case STEC_l corrected with is going too far away from the true value we the part that was adjusted with STEC_p.
+                                    if max(df_seg['diffSTEC'])>5*sigma: df_seg["STEC_l"] = df_seg['STEC_p_fit']
+                                    segment_anchored.append(True)
+                                else: segment_anchored.append(False)
+                                     
                                 d_df_seg.append(df_seg)
                                 has_sane_parts = True
                                 sane_indices.append(i)
                             else:
+                                segment_anchored.append(False)
                                 d_df_seg.append(None)
                         if not has_sane_parts: 
                             continue
 
+                        print (sane_indices,len(arc_borders_l))
+                        
                         # paste left part of arc
                         for i in range(sane_indices[0]-1,-1,-1):
                             df_seg = None
-                            date_border_filter  = (df_arc.index>=arc_borders[i]["t_left"]) & (df_arc.index<=arc_borders[i]["t_right"])
+                            date_border_filter  = (df_arc.index>=arc_borders_l[i]["t_left"]) & (df_arc.index<=arc_borders_l[i]["t_right"])
                             df_seg = df_arc[date_border_filter]
+                            print (i,arc_borders_l[i]["t_left"],arc_borders_l[i]["t_right"])
+                            
+                            brs = None
+                            N_valid_STEC_p = len(df_seg['STEC_p'].dropna())
+                            if N_valid_STEC_p>N_min_stec_p:
+                                df_seg_br = df_seg.dropna(subset=['STEC_p'])
+                                df_seg_br['BRs'] = (df_seg_br["STEC_p"]-df_seg_br["STEC_l"])*df_seg_br["sin2_ele"]
+                                brs=df_seg_br['BRs'].sum(skipna=True)/df_seg_br["sin2_ele"].sum(skipna=True)
+                                
+                            
 
-                            t_dist=(arc_borders[i+1]["t_left"]-arc_borders[i]["t_right"]).seconds
-                            slope = (arc_borders[i+1]["left_A"]+arc_borders[i]["right_A"])/2
-        
+                            t_dist=(arc_borders_l[i+1]["t_left"]-arc_borders_l[i]["t_right"]).seconds
+                            slope = (arc_borders_l[i+1]["left_A"]+arc_borders_l[i]["right_A"])/2        
                             glue=d_df_seg[i+1]["STEC_l"].iloc[0]-df_seg["STEC_l"].iloc[-1]-slope*t_dist
-                            df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
-                            brs=df_br['BRs'].sum(skipna=True)/df_br["sin2_ele"].sum(skipna=True)
-        
-                            if abs(glue-brs)>20: correction = brs
-                            else: correction = glue
-                            df_seg["STEC_l"] = df_seg["STEC_l"] + correction
+                            #df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
+                            
+                            # Case no baseline could be established
+                            if brs is None:
+                                df_seg["STEC_l"] = df_seg["STEC_l"] + glue
+                                print ('Using glue 11',arc_borders_l[i]['t_left'],arc_borders_l[i]['t_right'],glue)
+                            else:
+                                arc_has_baseline = True
+                                df_seg['diffSTEC'] = df_seg['STEC_l']-df_seg['STEC_p_fit']
+                                if (N_valid_STEC_p == len(df_seg['STEC_p'])) and (max(df_seg['diffSTEC'])>5*sigma): 
+                                    df_seg["STEC_l"] = df_seg['STEC_p_fit']
+                                    segment_anchored[i]=True
+                                elif abs(glue-brs)>20:
+                                    print ('Using baseline here 22',arc_borders_l[i]['t_left'],arc_borders_l[i]['t_right'])
+                                    df_seg["STEC_l"] = df_seg["STEC_l"] + brs
+                                    segment_anchored[i]=True
+                                else: 
+                                    print ('Using glue 11.2',arc_borders_l[i]['t_left'],arc_borders_l[i]['t_right'],'glue=',glue,'brs=',brs)
+                                    df_seg["STEC_l"] = df_seg["STEC_l"] + glue
+                            
+                            #df_seg["STEC_l"] = df_seg["STEC_l"] + brs
+                            #df_seg['diffSTEC'] = df_seg['STEC_l']-df_seg['STEC_p_fit']
+                            #if max(df_seg['diffSTEC'])>5*sigma: df_seg["STEC_l"] = df_seg['STEC_p_fit']
                             d_df_seg[i] = df_seg
 
                         # paste right part of arc
-                        for i in range(sane_indices[-1]+1,len(arc_borders)):
+                        for i in range(sane_indices[-1]+1,len(arc_borders_l)):
                             df_seg = None
-                            date_border_filter  = (df_arc.index>=arc_borders[i]["t_left"]) & (df_arc.index<=arc_borders[i]["t_right"])
+                            date_border_filter  = (df_arc.index>=arc_borders_l[i]["t_left"]) & (df_arc.index<=arc_borders_l[i]["t_right"])
                             df_seg = df_arc[date_border_filter]
-                            t_dist=(arc_borders[i]["t_left"]-arc_borders[i-1]["t_right"]).seconds
-        
-                            slope = arc_borders[i-1]["right_A"]
-        
+                            
+                            brs = None
+                            N_valid_STEC_p = len(df_seg['STEC_p'].dropna())
+                            if N_valid_STEC_p>N_min_stec_p:
+                                df_seg_br = df_seg.dropna(subset=['STEC_p'])
+                                df_seg_br['BRs'] = (df_seg_br["STEC_p"]-df_seg_br["STEC_l"])*df_seg_br["sin2_ele"]
+                                brs=df_seg_br['BRs'].sum(skipna=True)/df_seg_br["sin2_ele"].sum(skipna=True)
+                                
+                            #df_seg['BRs'] = (df_seg["STEC_p"]-df_seg["STEC_l"])*df_seg["sin2_ele"]
+                            
+                            t_dist=(arc_borders_l[i]["t_left"]-arc_borders_l[i-1]["t_right"]).seconds
+                            slope = arc_borders_l[i-1]["right_A"]       
                             glue=d_df_seg[i-1]["STEC_l"].iloc[-1]-df_seg["STEC_l"].iloc[0]+slope*t_dist
-                            df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
-                            brs=df_br['BRs'].sum(skipna=True)/df_br["sin2_ele"].sum(skipna=True)
-                            if abs(glue-brs)>20: correction = brs
-                            else: correction = glue
-                            df_seg["STEC_l"] = df_seg["STEC_l"] + correction
+                            
+                            #df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
+                            #brs=df_seg['BRs'].sum(skipna=True)/df_seg["sin2_ele"].sum(skipna=True)
+                            # Case no baseline could be established
+                            if brs is None:
+                                df_seg["STEC_l"] = df_seg["STEC_l"] + glue
+                                print ('Using glue 22',arc_borders_l[i]['t_left'],arc_borders_l[i]['t_right'])
+                            else:
+                                arc_has_baseline = True
+                                df_seg['diffSTEC'] = df_seg['STEC_l']-df_seg['STEC_p_fit']
+                                if (N_valid_STEC_p == len(df_seg['STEC_p'])) and (max(df_seg['diffSTEC'])>5*sigma): 
+                                    df_seg["STEC_l"] = df_seg['STEC_p_fit']
+                                elif abs(glue-brs)>20:
+                                    print ('Using baseline here 33')
+                                    df_seg["STEC_l"] = df_seg["STEC_l"] + brs
+                                else: 
+                                    df_seg["STEC_l"] = df_seg["STEC_l"] + glue
+                            
+                            #if not (brs is None) and (abs(glue-brs)>20): correction = brs
+                            #else: correction = glue
+                            #df_seg["STEC_l"] = df_seg["STEC_l"] + correction
+                            ##df_seg["STEC_l"] = df_seg["STEC_l"] + brs
+                            #df_seg['diffSTEC'] = df_seg['STEC_l']-df_seg['STEC_p_fit']
+                            #if max(df_seg['diffSTEC'])>5*sigma: df_seg["STEC_l"] = df_seg['STEC_p_fit']
                             d_df_seg[i] = df_seg
 
                         # Look at intermediate segments
@@ -1227,23 +1641,48 @@ class tec:
                                 only_left = False
                                 while ileft<=iright:
                                     if not only_left:
-                                        t_left = (arc_borders[ileft]["t_left"]-arc_borders[ileft-1]["t_right"]).seconds
-                                        t_right = (arc_borders[iright]["t_left"]-arc_borders[ileft]["t_right"]).seconds
+                                        t_left = (arc_borders_l[ileft]["t_left"]-arc_borders_l[ileft-1]["t_right"]).seconds
+                                        t_right = (arc_borders_l[iright]["t_left"]-arc_borders_l[ileft]["t_right"]).seconds
                                         if t_left<=t_right or only_right:
                                             df_seg = None
-                                            date_border_filter  = (df_arc.index>=arc_borders[ileft]["t_left"]) & (df_arc.index<=arc_borders[ileft]["t_right"])
+                                            date_border_filter  = (df_arc.index>=arc_borders_l[ileft]["t_left"]) & (df_arc.index<=arc_borders_l[ileft]["t_right"])
                                             df_seg = df_arc[date_border_filter]
+
+                                            brs = None
+                                            N_valid_STEC_p = len(df_seg['STEC_p'].dropna())
+                                            if N_valid_STEC_p>N_min_stec_p:
+                                                df_seg_br = df_seg.dropna(subset=['STEC_p'])
+                                                df_seg_br['BRs'] = (df_seg_br["STEC_p"]-df_seg_br["STEC_l"])*df_seg_br["sin2_ele"]
+                                                brs=df_seg_br['BRs'].sum(skipna=True)/df_seg_br["sin2_ele"].sum(skipna=True)
+                                            
+                                            #df_seg['BRs'] = (df_seg["STEC_p"]-df_seg["STEC_l"])*df_seg["sin2_ele"]
+                                            
                                             #df_seg = df_arc.loc[arc_borders[ileft]["t_left"]:arc_borders[ileft]["t_right"]]
-                                            t_dist=(arc_borders[ileft]["t_left"]-arc_borders[ileft-1]["t_right"]).seconds
-        
-                                            slope = arc_borders[ileft-1]["right_A"]
-        
+                                            t_dist=(arc_borders_l[ileft]["t_left"]-arc_borders_l[ileft-1]["t_right"]).seconds        
+                                            slope = arc_borders_l[ileft-1]["right_A"]        
                                             glue=d_df_seg[ileft-1]["STEC_l"].iloc[-1]-df_seg["STEC_l"].iloc[0]+slope*t_dist
-                                            df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
-                                            brs=df_br['BRs'].sum(skipna=True)/df_br["sin2_ele"].sum(skipna=True)
-                                            if abs(glue-brs)>20: correction = brs
-                                            else: correction = glue
-                                            df_seg["STEC_l"] = df_seg["STEC_l"] + correction
+
+                                            if brs is None:
+                                                print ('Using glue 33',arc_borders_l[i]['t_left'],arc_borders_l[i]['t_right'])
+                                                df_seg["STEC_l"] = df_seg["STEC_l"] + glue
+                                            else:
+                                                arc_has_baseline = True
+                                                df_seg['diffSTEC'] = df_seg['STEC_l']-df_seg['STEC_p_fit']
+                                                if (N_valid_STEC_p == len(df_seg['STEC_p'])) and (max(df_seg['diffSTEC'])>5*sigma):  
+                                                    df_seg["STEC_l"] = df_seg['STEC_p_fit']
+                                                elif abs(glue-brs)>20:
+                                                    print ('Using baseline here 44')
+                                                    df_seg["STEC_l"] = df_seg["STEC_l"] + brs
+                                                else: 
+                                                    df_seg["STEC_l"] = df_seg["STEC_l"] + glue                                            
+                                            #df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
+                                            #brs=df_seg['BRs'].sum(skipna=True)/df_seg["sin2_ele"].sum(skipna=True)
+                                            #if abs(glue-brs)>20: correction = brs
+                                            #else: correction = glue
+                                            #df_seg["STEC_l"] = df_seg["STEC_l"] + correction
+                                            #df_seg["STEC_l"] = df_seg["STEC_l"] + brs
+                                            #df_seg['diffSTEC'] = df_seg['STEC_l']-df_seg['STEC_p_fit']
+                                            #if max(df_seg['diffSTEC'])>5*sigma: df_seg["STEC_l"] = df_seg['STEC_p_fit']
         
                                             d_df_seg[ileft] = df_seg
                                             ileft+=1
@@ -1251,36 +1690,60 @@ class tec:
                                             only_left=True
                                         if ileft>iright: break
                                     if not only_right:
-                                        t_left = (arc_borders[iright]["t_left"]-arc_borders[ileft]["t_right"]).seconds
-                                        t_right = (arc_borders[iright+1]["t_left"]-arc_borders[iright]["t_right"]).seconds
+                                        t_left = (arc_borders_l[iright]["t_left"]-arc_borders_l[ileft]["t_right"]).seconds
+                                        t_right = (arc_borders_l[iright+1]["t_left"]-arc_borders_l[iright]["t_right"]).seconds
                                         if t_left>=t_right or only_left:
                                             df_seg = None
-                                            date_border_filter  = (df_arc.index>=arc_borders[iright]["t_left"]) & (df_arc.index<=arc_borders[iright]["t_right"])
+                                            date_border_filter  = (df_arc.index>=arc_borders_l[iright]["t_left"]) & (df_arc.index<=arc_borders_l[iright]["t_right"])
                                             df_seg = df_arc[date_border_filter]
+
+                                            brs = None
+                                            N_valid_STEC_p = len(df_seg['STEC_p'].dropna())
+                                            if N_valid_STEC_p>N_min_stec_p:
+                                                df_seg_br = df_seg.dropna(subset=['STEC_p'])
+                                                df_seg_br['BRs'] = (df_seg_br["STEC_p"]-df_seg_br["STEC_l"])*df_seg_br["sin2_ele"]
+                                                brs=df_seg_br['BRs'].sum(skipna=True)/df_seg_br["sin2_ele"].sum(skipna=True)
+                                                                                            
+                                            #df_seg['BRs'] = (df_seg["STEC_p"]-df_seg["STEC_l"])*df_seg["sin2_ele"]
                                             #df_seg = df_arc.loc[arc_borders[iright]["t_left"]:arc_borders[iright]["t_right"]]
-                                            t_dist=(arc_borders[iright+1]["t_left"]-arc_borders[iright]["t_right"]).seconds
-        
-                                            slope = arc_borders[iright+1]["right_A"]
-        
+                                            t_dist=(arc_borders_l[iright+1]["t_left"]-arc_borders_l[iright]["t_right"]).seconds        
+                                            slope = arc_borders_l[iright+1]["right_A"]        
                                             glue=d_df_seg[iright+1]["STEC_l"].iloc[0]-df_seg["STEC_l"].iloc[-1]+slope*t_dist
-                                            df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
-                                            brs=df_br['BRs'].sum(skipna=True)/df_br["sin2_ele"].sum(skipna=True)
-                                            if abs(glue-brs)>20: correction = brs
-                                            else: correction = glue
-                                            df_seg["STEC_l"] = df_seg["STEC_l"] + correction
-        
+                                            #df_br = df_seg.dropna(subset=['BRs',"sin2_ele"])
+                                            #brs=df_br['BRs'].sum(skipna=True)/df_br["sin2_ele"].sum(skipna=True)
+                                            #if abs(glue-brs)>20: correction = brs
+                                            #else: correction = glue
+                                            ##df_seg["STEC_l"] = df_seg["STEC_l"] + correction
+                                            #df_seg["STEC_l"] = df_seg["STEC_l"] + brs
+                                            #df_seg['diffSTEC'] = df_seg['STEC_l']-df_seg['STEC_p_fit']
+                                            #if max(df_seg['diffSTEC'])>5*sigma: df_seg["STEC_l"] = df_seg['STEC_p_fit'] 
+                                            if brs is None:
+                                                print ('Using glue 44',arc_borders_l[i]['t_left'],arc_borders_l[i]['t_right'])
+                                                df_seg["STEC_l"] = df_seg["STEC_l"] + glue
+                                            else:
+                                                arc_has_baseline = True
+                                                df_seg['diffSTEC'] = df_seg['STEC_l']-df_seg['STEC_p_fit']
+                                                if (N_valid_STEC_p == len(df_seg['STEC_p'])) and (max(df_seg['diffSTEC'])>5*sigma):  
+                                                    df_seg["STEC_l"] = df_seg['STEC_p_fit']
+                                                elif abs(glue-brs)>20:
+                                                    print ('Using baseline here 55')
+                                                    df_seg["STEC_l"] = df_seg["STEC_l"] + brs
+                                                else: 
+                                                    df_seg["STEC_l"] = df_seg["STEC_l"] + glue
+                                                           
                                             d_df_seg[iright] = df_seg
                                             iright-=1
                                         elif not only_left:
                                             only_right=True
+                        '''
 
-                        df_filter_arc = pd.DataFrame()
-                        for df in d_df_seg:
-                            if df is None:continue
-                            df_filter_arc = pd.concat([df_filter_arc,df])                        
+                        #df_filter_arc = pd.DataFrame()
+                        #for df in d_df_seg:
+                        #    if df is None:continue
+                        #    df_filter_arc = pd.concat([df_filter_arc,df])                        
                         
-                        
-                        df_arcs = pd.concat([df_arcs,df_filter_arc])    
+                        if len(d_df_seg)!=1: continue
+                        df_arcs = pd.concat([df_arcs,d_df_seg[0]])    
         
                     if len(df_arcs)==0: continue
                     if len(df_sat_filter)==0: df_sat_filter = df_arcs
@@ -1290,17 +1753,16 @@ class tec:
 
                     df_sat_filter['C1'] = channel['C1']
                     df_sat_filter['C2'] = channel['C2']
+                 
  
                     df_filtered = pd.concat([df_filtered,df_sat_filter])
 
-            
+
             if len(df_filtered)==0: continue
             self.list_df[const] = df_filtered
 
-
             self.list_df[const]['time_day'] = self.list_df[const].index.normalize()
             self.list_df[const].reset_index(inplace=True)   # 'time' becomes a column
-
 
             p1p2_mask = (self.list_df[const]['C1'] == 'P1') & (self.list_df[const]['C2'] == 'P2')
             self.list_df[const].loc[p1p2_mask, 'time_day'] = self.list_df[const].loc[p1p2_mask, 'time_day'].dt.to_period('M').dt.to_timestamp()
@@ -1316,13 +1778,15 @@ class tec:
 
             if len(self.list_df[const])==0: continue 
                 
-            
             # Restore original index and drop helper columns
+            
             self.list_df[const] = self.list_df[const].set_index('time').drop(columns=['time_day', 'time_df2'])
 
+            
             if const!='S':
-                self.list_df[const]["STEC_l"] += self.list_df[const]["dcb"]
+                #self.list_df[const]["STEC_l"] += self.list_df[const]["dcb"]
                 self.list_df[const]["VTEC"]=self.list_df[const]["STEC_l"]*self.list_df[const]['cos_chi']
+
     
     def compute_receiver_bias(self,resolution=datetime.timedelta(days=1)):
         ''' Sylvain Blunier 06/2021 v1.0.0

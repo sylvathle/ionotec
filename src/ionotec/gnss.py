@@ -412,6 +412,7 @@ class gnss:
             self.df_nav_gnss[const] = pd.DataFrame()
 
         dict_file_processed = {'files':[]}
+        print (self.csv_record_processing)
         
         if os.path.exists(self.csv_record_processing):
             df_doy_processed = pd.read_csv(self.csv_record_processing)
