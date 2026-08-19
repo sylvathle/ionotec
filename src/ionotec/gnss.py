@@ -44,6 +44,14 @@ from pathlib import Path
 
 import psutil
 
+
+#import gzip
+#import shutil
+
+#import time
+#import requests
+#from bs4 import BeautifulSoup
+
 pd.options.mode.chained_assignment = None
 
 #import random
@@ -52,6 +60,8 @@ pd.options.mode.chained_assignment = None
 #import matplotlib.pyplot as plt
 from . import stations as st
 from . import rinex as rx
+from . import igs
+
 
 from os import listdir
 from os.path import isfile, join
@@ -71,6 +81,8 @@ a_major_ellipsoid_axis = 6378136
 
 GPS_EPOCH  = datetime.datetime(1980, 1, 6)
 BDS_EPOCH  = datetime.datetime(2006, 1, 1)
+
+
 
 def getDateFromSat(Week, Toe, system='G'):
     epoch = BDS_EPOCH if system == 'C' else GPS_EPOCH
@@ -222,6 +234,123 @@ def ephemeris_to_XYZ(data,date):
     
     return [Xk,Yk,Zk]
 
+
+def _flag_with_positions(df, tgd_tol=1e-9, clock_tol=1e-6, mad_k=6, window=5):
+    """Same logic as flag_corrupted_nav_rows, but also returns global row
+    positions (into the original df) that were flagged, for safe dropping."""
+    df = df.sort_index()
+    flags = []
+    bad_positions = set()
+    elems = ['Eccentricity', 'Crs', 'Cuc', 'Cus', 'Io', 'IDOT']
+
+    # global positions per row, aligned to df's current (sorted) order
+    global_pos = np.arange(len(df))
+    df = df.assign(_gpos=global_pos)
+
+    for sv, g in df.groupby('sv'):
+        g = g.sort_index()
+        epochs = g.index.to_numpy()
+        gpos = g['_gpos'].to_numpy()
+        n = len(g)
+        if n == 0:
+            continue
+
+        tgd = g['TGD'].to_numpy()
+        af0 = g['SVclockBias'].to_numpy()
+        af1 = g['SVclockDrift'].to_numpy()
+
+        tgd_med = np.median(tgd)
+        for i in range(n):
+            if abs(tgd[i] - tgd_med) > tgd_tol:
+                flags.append((sv, epochs[i], f"TGD deviates: {tgd[i]:.3e} vs {tgd_med:.3e}"))
+                bad_positions.add(gpos[i])
+
+        if n >= 2:
+            dt = np.diff(epochs).astype('timedelta64[s]').astype(float)
+            af0_pred = af0[:-1] + af1[:-1] * dt
+            resid = np.abs(af0[1:] - af0_pred)
+            for i in np.where(resid > clock_tol)[0]:
+                flags.append((sv, epochs[i + 1], f"SVclockBias jump: residual={resid[i]:.3e}s"))
+                bad_positions.add(gpos[i + 1])
+
+        for el in elems:
+            vals = g[el].to_numpy()
+            for i in range(n):
+                lo, hi = max(0, i - window), min(n, i + window + 1)
+                neighborhood = np.delete(vals[lo:hi], i - lo)
+                if len(neighborhood) < 3:
+                    continue
+                med = np.median(neighborhood)
+                mad = np.median(np.abs(neighborhood - med)) or 1e-12
+                z = 0.6745 * (vals[i] - med) / mad
+                if abs(z) > mad_k:
+                    flags.append((sv, epochs[i], f"{el} robust-z={z:.1f}"))
+                    bad_positions.add(gpos[i])
+
+    return pd.DataFrame(flags, columns=['sv', 'epoch', 'reason']), bad_positions
+
+
+def filter_corrupted_nav_rows(df, **kwargs):
+    df = df.sort_index()
+    flags_df, bad_positions = _flag_with_positions(df, **kwargs)
+    keep_mask = np.ones(len(df), dtype=bool)
+    keep_mask[list(bad_positions)] = False
+    clean_df = df.iloc[keep_mask].copy()
+    return clean_df, flags_df
+    
+
+    
+    
+GLONASS_POSITION_COLUMNS = ['sv', 'X', 'Y', 'Z', 'dX', 'dY', 'dZ', 'dX2', 'dY2', 'dZ2']
+
+#def drop_duplicate_ephemeris_glonass(df, decimals=3, tiebreak_col='MessageFrameTime'):
+#    """
+#    GLONASS-specific version: catches duplicate state vectors even when they
+#    carry a different (mislabeled) timestamp, by comparing on position/
+#    velocity/acceleration content rather than epoch.
+#    """
+#    df = df.sort_index()
+#    df_rounded = df.copy()
+#    float_cols = [c for c in GLONASS_POSITION_COLUMNS if c != 'sv']
+#    df_rounded[float_cols] = df[float_cols].round(decimals)
+
+#    # keep='first' preserves the earliest (presumably correctly-timestamped) occurrence
+#    dupe_mask = df_rounded.duplicated(subset=GLONASS_POSITION_COLUMNS, keep='first')
+#    return df[~dupe_mask].sort_index()
+    
+    
+def drop_duplicate_ephemeris_glonass(df, decimals=3, nominal_cadence_min=30):
+    """
+    Deduplicates GLONASS state vectors by content. When duplicates are found,
+    keeps the occurrence whose timestamp best fits the satellite's expected
+    broadcast cadence, rather than assuming sort order is meaningful.
+    """
+    df = df.sort_index()
+    float_cols = ['X', 'Y', 'Z', 'dX', 'dY', 'dZ', 'dX2', 'dY2', 'dZ2']
+    df_rounded = df.copy()
+    df_rounded[float_cols] = df[float_cols].round(decimals)
+
+    keep_rows = []
+    for sv, g in df_rounded.groupby('sv'):
+        g_orig = df.loc[g.index]
+        seen = {}
+        for ts, row in g.iterrows():
+            key = tuple(row[float_cols])
+            minute = ts.minute
+            # "on-grid" if minute is a multiple of the nominal cadence
+            on_grid = (minute % nominal_cadence_min == 0)
+            if key not in seen:
+                seen[key] = (ts, on_grid)
+            else:
+                prev_ts, prev_on_grid = seen[key]
+                # prefer the on-grid timestamp; if both/neither on-grid, keep earliest
+                if on_grid and not prev_on_grid:
+                    seen[key] = (ts, on_grid)
+        keep_rows.extend([ts for ts, _ in seen.values()])
+
+    return df.loc[sorted(set(keep_rows))]
+
+
 def split_interpolate_concat(df, gap_threshold='3h'):
     """
     Split a dataframe on gaps larger than gap_threshold,
@@ -329,6 +458,9 @@ def remove_duplicated_dates(file_path):
     f = open(file_path,'w')
     f.write(new_file_lines)
     f.close()
+    
+    
+
 
 
 class gnss:
@@ -341,9 +473,6 @@ class gnss:
 
     file_format = 'feather' ## csv format not implemented
 
-    #n_sat_gps = 32
-    #n_sat_glonass = 24
-    #n_sat_galileo = 25
     resolution = 60
 
     list_f_rinex_nav = []
@@ -353,7 +482,7 @@ class gnss:
     f_doy_reported = ""
     
     
-    def __init__(self,f_nav=[],datemin=None, datemax=None, form='feather'):
+    def __init__(self,f_nav=[],datemin=None, datemax=None, list_satellites=[],reprocess=False):
         self.gnss_dir = st.root_dir + "GNSS/"
         
         if not os.path.exists(self.gnss_dir):
@@ -362,45 +491,114 @@ class gnss:
                 if e.errno!=17: print ("FAIL creation of directory "+self.gnss_dir, e )
             else: print ("Successfully created the directory "+self.gnss_dir)
 
+        self.list_satellites = list_satellites
+        list_const_suff = []
+
+        """
+         Suff const
+         yyn  GPS
+         yyq  QZSS
+         yyg  GLONASS
+         yyf  BDS
+         yyh  SBAS
+         yyi  INRSS
+         yyl  Galileo
+        """       
+        convert_sv0_suff0 = {'G':'n','R':'g','E':'l','J':'q','S':'h','C':'f','I':'i'}
+        self.list_constellation = []
+        
+        
+        for sv in ["C57","C58"]:
+            if sv in list_satellites:
+                list_satellites.remove(sv)
+        
+        for sv in list_satellites:
+           suff0 = convert_sv0_suff0[sv[0]]
+           if suff0 not in list_const_suff:
+              list_const_suff.append(suff0)
+           if sv[0] not in self.list_constellation:
+              self.list_constellation.append(sv[0])
+              
+              
+        #print ('list_const', list_const_suff,self.list_constellation)
         self.datemin = datemin
         self.datemax = datemax
-
-        self.file_format = form
-        self.list_f_rinex_nav = f_nav
-        self.dict_df_pos = {}
+        
         self.df_pos = pd.DataFrame()
 
-        self.list_constellation = ['G','E','C','J','R','S']
         self.df_nav_gnss = {}
+
+               
+        self.resolution = 60
+
         
-        #self.df_doy_processed = pd.DataFrame()
-        self.dict_doy_processed = {}# {"date":[],"G_res":[],"R_res":[]}
-        self.csv_record_processing = self.gnss_dir+"/record_processing.csv"
+
+        #print (self.datemin,self.datemax)
         
-        self.resolution = 1
+        need_more_process = False
+        d = self.datemin
+        n_expected_data = int(24*3600/self.resolution)
+        while d<self.datemax:
+            year = d.year
+            day = d.day
+            doy = (d.date() - datetime.date(year,1,1)).days + 1
+           
+            for sv in list_satellites:
+                feather_sat_file =  self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+".feather"
+                # If the file doesn't exist then this day needs to be processed
+                if not os.path.exists(feather_sat_file): 
+                    need_more_process = True
+                    break
+                else:
+                    df_day = pd.read_feather(feather_sat_file)
+                    if len(df_day)!=n_expected_data: 
+                        need_more_process=True
+                        break
+            d += datetime.timedelta(days=1)
+
+        if not need_more_process and not reprocess: 
+            #print ("Not need to reprocess GNSS position")
+            return
+            
+        n_file_downloaded = 10
+    
+        directory_GNSS_path = Path(self.gnss_dir)
+        
+        # Case no DCB file is provided, we try downloading them
+        if len(f_nav) == 0:            
+            
+            d = self.datemin-datetime.timedelta(days=1)
+            while d<self.datemax+datetime.timedelta(days=1):
+                year = d.year
+                doy = (d.date() - datetime.date(year,1,1)).days + 1
+                n_files_ready = 0
+                for c in list_const_suff:
+                    suff = str(year-2000)+c                    
+                    
+                    directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
+                    if not os.path.exists(directory_GNSS_path_const):
+                        list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded-n_files_ready)
+                        for f in list_downloaded:
+                            f_nav.append(Path(f))
+                    else: 
+                    
+                        listnav_year_doy_suff = []
+                        for file in directory_GNSS_path_const.iterdir(): 
+                            if file.is_file(): listnav_year_doy_suff.append(file)
+                        f_nav += listnav_year_doy_suff
+                        n_files_ready = len(listnav_year_doy_suff)
+                        if len(listnav_year_doy_suff)<n_file_downloaded: 
+                            list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded-n_files_ready)
+                            for f in list_downloaded:
+                                if Path(f) not in f_nav:
+                                    f_nav.append(Path(f))
+                
+                d += datetime.timedelta(days=1)
+                
+        self.list_f_rinex_nav = f_nav
       
         self.compute_position()
 
-
-    def inform_date_processed(self,list_date,constellation):
-        # Make sure there is data before 10:00
-        cutoff_I = datetime.time(4, 0)
-        cutoff_F = datetime.time(20, 0)
-        dates = {
-            dt.date()
-            for dt in list_date
-                if (dt.time() < cutoff_F) and (cutoff_I > dt.time())
-        }
-
-
-        for date in dates:  
-            if date in self.dict_doy_processed.keys():
-                if (self.resolution<self.dict_doy_processed[date][constellation+"_res"]) or\
-                    (self.dict_doy_processed[date][constellation+"_res"]==0):
-                    self.dict_doy_processed[date][constellation+"_res"] = self.resolution
-            else:
-                self.dict_doy_processed[date] = {"G_res":0,"R_res":0,"E_res":0,"C_res":0,"J_res":0,"S_res":0}
-                self.dict_doy_processed[date][constellation+"_res"]=self.resolution
     
     # Function that compute the position of the satellites from the navigation file 
     #   with the resolution informed when instanciating the gnss object
@@ -411,17 +609,8 @@ class gnss:
         for const in self.list_constellation:
             self.df_nav_gnss[const] = pd.DataFrame()
 
-        dict_file_processed = {'files':[]}
-        print (self.csv_record_processing)
-        
-        if os.path.exists(self.csv_record_processing):
-            df_doy_processed = pd.read_csv(self.csv_record_processing)
-            dict_file_processed['files'] = df_doy_processed['files'].to_list()
-
 
         for f_rinex_nav in self.list_f_rinex_nav:
-
-            if f_rinex_nav.name in dict_file_processed['files']: continue
 
             try: nav = rx.rinex(str(f_rinex_nav))
             except: continue
@@ -434,10 +623,26 @@ class gnss:
                 continue
             
             if len(df_nav)==0: continue
-
+            
+            
 
             df_nav.index.set_names(["time","sv"],inplace=True)
             df_nav.reset_index(level=["sv"],inplace=True)
+            
+            
+            #print (df_nav[ (df_nav['sv']=="G13")])
+            
+            #print (flags)
+            #print (f_rinex_nav)
+            #print (df_nav[ (df_nav['sv']=="R16")])
+            
+            
+            #df_G13 = df_nav[ (df_nav['sv']=="G13")]
+
+            #if len(df_G13)!=0:
+            #    print (f_rinex_nav)
+            #    print (df_nav[ (df_nav['sv']=="G13")].columns)
+
 
             for c in df_nav.columns:
                 if 'spare' in c:
@@ -449,58 +654,67 @@ class gnss:
 
             df_nav.index = pd.to_datetime(df_nav.index)
 
-            dict_file_processed['files'].append(f_rinex_nav.name)
-
             if len(df_nav)==0: 
                 continue
 
-            date = df_nav.index[int(len(df_nav)/2)].date()
+            #date = df_nav.index[int(len(df_nav)/2)].date()
             
             df_nav.sort_index(ascending=True,inplace=True)
-            #df_nav['file'] = f_rinex_nav.name
+
             self.df_nav_gnss[svtype] = pd.concat([self.df_nav_gnss[svtype],df_nav])
 
-        min_date = self.datemin.replace(second=0, microsecond=0)
-        max_date = self.datemax.replace(second=0, microsecond=0)
+        min_date = self.datemin.replace(hour=0,minute=0,second=0, microsecond=0)
+        midnight = self.datemax.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # If the time is exactly midnight, return it as is
+        if self.datemax == midnight: max_date = midnight
+        # Otherwise, the next midnight is next day
+        else: max_date = midnight + datetime.timedelta(days=1)
+        
 
         time_list = []
         t = min_date
-
-        self.resolution = 60
                             
         while t<max_date:
             time_list.append(t)
             t = t+datetime.timedelta(seconds=self.resolution)
 
-        #self.df_nav_gnss['G'].to_csv("df_nav_gnss.csv")
-        #sys.exit()
-        
+        #print (time_list[0],time_list[-1])
+
 
         for const in self.df_nav_gnss.keys():
             if (len(self.df_nav_gnss[const])<=2): continue
             list_sv = self.df_nav_gnss[const]["sv"].unique().tolist()
+            
+            if "TGD" in self.df_nav_gnss[const].columns:
+                self.df_nav_gnss[const], flags = filter_corrupted_nav_rows(self.df_nav_gnss[const])
+                
+            if const in ["R","S"]:
+                self.df_nav_gnss[const] = drop_duplicate_ephemeris_glonass(self.df_nav_gnss[const])
+            
+            
+            
+            #self.df_nav_gnss[const] = self.df_nav_gnss[const].drop_duplicates()
+            
             self.df_nav_gnss[const] = self.df_nav_gnss[const].groupby(["time","sv"]).mean()
             self.df_nav_gnss[const].reset_index(level=["sv"],inplace=True)
+            #print (self.df_nav_gnss[const])
+            
+            
+            if const=='R':
+                with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+                    self.df_nav_gnss[const][ (self.df_nav_gnss[const]['sv']=="R16") & (self.df_nav_gnss[const].index>datetime.datetime(2024,5,9,12,0,0,0)) & (self.df_nav_gnss[const].index<datetime.datetime(2024,5,9,18,0,0,0))].to_csv('R16.csv')
+            
+            df_nav, flags = filter_corrupted_nav_rows(df_nav)
 
 
             for sv in list_sv:
+                if sv in ["C57","C58"]: continue
                 print (sv)
 
                 if len(sv)>3: continue
                 df_sat = self.df_nav_gnss[const][self.df_nav_gnss[const]["sv"]==sv]
                 if len(df_sat)<3: continue
-
-                #if sv=="G14": print (df_sat)
-
-                #if os.path.exists("output/GNSS/"+sv+".feather"): continue
-
-
-                #df_sat = removeOutsiders(df_sat)
-                #df_sat = df_sat[ (df_sat.index>self.datemin) & (df_sat.index<self.datemax) ]
-                
-                #min_date = min(df_sat.index)
-                #max_date = max(df_sat.index)
-
 
 
                 if sv[0] in ['G','E','C','J']:
@@ -513,6 +727,7 @@ class gnss:
                         #if sv=="G14": print (t_nav)
                         # Calculate position for each time in time_list that are before the next available position information
                         while date < t_nav and i_time_list<len(time_list):
+                            #print (date,t_nav)
                             #if sv=="G14": print ("\t",date)
                             sat_pos = ephemeris_to_XYZ(row,date)
                             dict_sat_pos["time"].append(date)
@@ -541,21 +756,27 @@ class gnss:
                     new_index = df_sat.index.union(time_list)
                     df_sat = df_sat.reindex(new_index).sort_index()
                     df_sat = split_interpolate_concat(df_sat[['X','Y','Z']], gap_threshold='3h')
-                    df_sat['sv'] = sv
 
-                csv_nav_sat = self.gnss_dir + "/" + sv +".feather"
-    
-                if os.path.exists(csv_nav_sat):
-                    df_former_sat = pd.read_feather(csv_nav_sat)
-                    df_former_sat = df_former_sat[~df_former_sat.index.isin(df_sat.index)]
-                    df_sat = pd.concat([df_former_sat,df_sat])
-                    df_sat = df_sat.sort_index()
-
-
-                df_sat.drop_duplicates().to_feather(csv_nav_sat)
-        
-        df_doy_processed = pd.DataFrame(dict_file_processed)
-        df_doy_processed.to_csv(self.csv_record_processing,index=True)
+                d = self.datemin
+                n_expected_data = int(24*3600/self.resolution)
+                while d<self.datemax:
+                    
+                    year = d.year
+                    day = d.day
+                    doy = (d.date() - datetime.date(year,1,1)).days + 1
+                    df_day = df_sat[(df_sat.index.year == year) & (df_sat.index.day == day)]
+                    
+                    if (len(df_day)!=n_expected_data): 
+                        print ("Warning, "+sv+" has incomplete position time series for year:"+str(year)+" doy:"+str(doy),end=" -- ")
+                        print (len(df_day),"data point instead of",n_expected_data)
+                        print ("\t VTEC will be NaN for observation points falling within missing navigation time index:\n\t recommend adding more navigation rinex")
+                        #print (df_day)
+                    #print (d,self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+"_"+dday_start+"_"+dday_end+".feather")
+                    feather_sat_file =  self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+".feather"
+                    df_day.drop_duplicates().to_feather(feather_sat_file)
+                    
+                    d += datetime.timedelta(days=1)
+                    
 
     def load_all_sats(self):
 
@@ -566,52 +787,33 @@ class gnss:
         '''
     
         ##year = d_in.year
-        first = True
+        #first = True
 
-        gnss_data_dir = Path(self.gnss_dir )
+        self.df_pos = pd.DataFrame()
 
-        folder = Path(gnss_data_dir)
-        list_gnss = [f for f in folder.glob('*feather') if f.is_file()]
-
-        tot_mem_gnss_loaded = 0
-        tot_mem_gnss = 0
-
-        for fgnss in list_gnss:
-
-            sat_path = fgnss.resolve()
-            sat_file = fgnss.name
-            split_sat = sat_file.split(".")
-
-
-
-            if split_sat[-1]!="feather": continue
-            sat = split_sat[0]
+        for sv in self.list_satellites:            
             
-            self.dict_df_pos[sat] = pd.read_feather(sat_path)
-    
-            self.dict_df_pos[sat].index = pd.to_datetime(self.dict_df_pos[sat].index)
-            #print(f"dict_df_pos[{sat}]: {sys.getsizeof(self.dict_df_pos[sat])/ 1024**2:.2f} MB, len(dict_df_pos[{sat}])={len(self.dict_df_pos[sat])}")
-            #tot_mem_gnss_loaded += sys.getsizeof(self.dict_df_pos[sat])
-
-            mask = (self.dict_df_pos[sat].index>=self.datemin) & (self.dict_df_pos[sat].index<=self.datemax)
-            self.dict_df_pos[sat]=self.dict_df_pos[sat].loc[mask]
-
-            #tot_mem_gnss += sys.getsizeof(self.dict_df_pos[sat])
-
-
-            if first:
-                self.df_pos = self.dict_df_pos[sat]
-                self.df_pos["sv"] = sat
-                first = False
-            else:
-                df_inter = self.dict_df_pos[sat]
-                df_inter["sv"] = sat
-                self.df_pos = pd.concat([self.df_pos,df_inter])
-
-        self.df_pos.drop_duplicates(inplace=True)
+            d = self.datemin
+            
+            while d<self.datemax:
+                year = d.year
+                doy = (d.date() - datetime.date(year,1,1)).days + 1                
+                feather_sat_file =  self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+".feather"
+                if os.path.exists(feather_sat_file):
+                    df_sv = pd.read_feather(feather_sat_file)
+                    df_sv['sv']=sv
+                    self.df_pos = pd.concat([self.df_pos,df_sv])
+                else: print (feather_sat_file, ' not existing')
+                d += datetime.timedelta(days=1)
+                
+            
+        mask = (self.df_pos.index>=self.datemin) & (self.df_pos.index<self.datemax)
+        self.df_pos=self.df_pos.loc[mask]
+        
+        #print (self.df_pos)
 
 
-    
+    """
     # Function that loads the satellite of a specific year, files must exist, otherwise load empty
     def load_sats(self,const,d_in,d_out):
 
@@ -655,7 +857,7 @@ class gnss:
                 self.df_pos = pd.concat([self.df_pos,df_inter])
 
         self.df_pos.drop_duplicates(inplace=True)
-
+    """
 
     
     def getElevation(self,df,pos_antena):

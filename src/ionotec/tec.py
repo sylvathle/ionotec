@@ -73,36 +73,7 @@ R_E = 6371000
 
 
 
-def fit_lin(t,sig):
-    N=len(t)
-    # Coefficients of paraboloid of error function (N*mse)
-    a,b,c,d,e=0,N,0,0,0 # b=N for B^2 coef
-    # Iterate over subseries to calculate coefficients
-    for i in range(N):
-        a+=t[i]**2 # A^2 coef
-        c+=2*t[i] # A*B coef
-        d-=2*t[i]*sig[i] # A coef
-        e-=2*sig[i] # B coef
 
-    if (a==0) and (c==0):
-        return float('NaN'),float('NaN'),float('NaN'),float('NaN')
-        
-    # Forward A and B parameters of linear fit (solve the minimum of mse)
-    A=-(2*b*d-c*e)/(4*a*b-c**2)
-    B=-(c*d-2*a*e)/(c**2-4*a*b)
-
-    
-    sigma=0
-    sigmas = []
-    # Calculate value of err function
-    for i in range(N):
-        s = abs(sig[i]-A*t[i]-B)
-        sigma+=s
-        sigmas.append(s)
-    max_deviation = max(sigmas)
-    mean_deviation = np.mean(sigmas)
-
-    return A,B,max_deviation,mean_deviation
 
 def tleft(border):
     return border["t_left"]
@@ -366,39 +337,82 @@ class tec:
 
         self.gnss = gnss.gnss(self.list_f_nav)
 
-        self.load_sat_DCB()
-        self.sat_dcb.reset_index(inplace=True)
+        self.sat_dcb = DCB.load_dcb(self.list_f_dcb,datemin=self.datemin,datemax=self.datemax)
+        #
 
-    def load_rinex_lists(self,list_f_obs,list_f_nav,list_f_dcb,datemin=None, datemax=None, h=350000):
+    def load_rinex_lists(self,list_f_obs,list_f_nav=None,list_f_dcb=None,datemin=None, datemax=None, h=350000):
         self.h = h
 
         self.list_f_obs = list_f_obs 
+        
         # List of navigation files
-        self.list_f_nav = list_f_nav
+        self.list_f_nav = list_f_nav if not list_f_nav is None else []
+        
         # File containing satellite bias
-        self.list_f_dcb = list_f_dcb
+        self.list_f_dcb = list_f_dcb if not list_f_dcb is None else []
+        
+        self.list_df = {}
+                
+        
+        for f_obs in list_f_obs:
+            rfile = rx.rinex(f_obs)
+            header = rfile.read_header()
+            ## Avoid running files that are not in the requested date range
+            datelim_cond = (
+		(datemin is None or header["t_first_obs"].date() >= datemin.date()) and
+		(datemax is None or header["t_first_obs"].date() <= datemax.date())
+            )
+            if not datelim_cond: continue
+            
+            self.station = header["name_station"].replace(" ","").lower()
+            self.coord = header['position']
+            list_df_f_obs = rfile.read_data()
 
-        for f in list_f_obs:
-            station = f.name[:4].lower()
-            if not station in self.list_obs_stations:
-                self.list_obs_stations.append(station)
-                self.dict_f_obs[station] = [f]
-            else:
-                self.dict_f_obs[station].append(f)
+            for const, df in list_df_f_obs.items():
+                df.set_index('time',inplace=True)
+                if const in self.list_df.keys():
+                    self.list_df[const] = pd.concat([self.list_df[const],df])
+                else:
+                    self.list_df[const] = df
+                #print (self.list_df[const])
+            
+        self.datemin = None
+         
+        for constellation in self.list_df.keys():
+            if self.datemin is None: self.datemin = min(self.list_df[constellation].index)
+            else: self.datemin = min(self.datemin, min(self.list_df[constellation].index))
+        if not datemin is None: self.datemin = max(self.datemin,datemin)
+        #else: self.datemin = datemin
+
+        self.datemax= None
+        #if datemax is None: 
+        for constellation in self.list_df.keys():
+            if self.datemax is None: self.datemax = max(self.list_df[constellation].index)
+            else: self.datemax = max(self.datemax, max(self.list_df[constellation].index))
+        if not datemax is None: self.datemax = min(self.datemax,datemax)
+        #else: self.datemax = datemax      
         
 
-        self.datemin = datemin
-        self.datemax = datemax
-        
+        const_to_del = []
+        for k in self.list_df.keys():
+            if k!="S": continue
+            const_to_del.append(k)
+        for const in const_to_del:
+            del self.list_df[const]
+            
+        list_all_sv = []
+        for const in self.list_df.keys():
+            list_all_sv += self.list_df[const]['sv'].unique().tolist()            
 
-        self.gnss = gnss.gnss(self.list_f_nav,self.datemin,self.datemax)
-        self.gnss.load_all_sats()
+            
+            
+        self.gnss = gnss.gnss(datemin=self.datemin,datemax=self.datemax,list_satellites=list_all_sv)
+        self.gnss.load_all_sats()        
 
-        self.load_sat_DCB()
-        self.sat_dcb.reset_index(inplace=True)
+        self.sat_dcb = DCB.load_dcb(self.list_f_dcb,datemin=self.datemin,datemax=self.datemax)
+        #print (self.sat_dcb)
 
-        for station in self.dict_f_obs.keys():
-            self.dict_f_obs[station] = sorted(self.dict_f_obs[station])
+
 
     def prepare_files(self):
         directory_path = Path(self.source_data_folder)
@@ -430,7 +444,6 @@ class tec:
                 station = file.name[:4].lower()
                 if station not in self.list_obs_stations:
                     self.list_obs_stations.append(station)
-
                 
 
                 if not station in list_day_f_obs.keys(): 
@@ -492,43 +505,7 @@ class tec:
     def rinex_to_stec(self,station):
         ''' Extract the relevant data for tec calculation from observation and navigation
             Compute STEC of pseudo range and code phase
-        '''       
-
-        
-        list_f_obs = self.dict_f_obs[station]
-
-        for f_obs in list_f_obs:
-            print (f_obs)
-
-            try:
-                rfile = rx.rinex(f_obs)
-                header = rfile.read_header()
-            except ValueError: continue
-
-            self.station =header["name_station"].replace(" ","").lower()
-            self.coord = header['position']
-            list_df_f_obs = rfile.read_data()
-            #try: list_df_f_obs = rfile.read_data()
-            #except Exception as e:
-            #    print ("PROBLEM READING ",f_obs)
-            #    print (e)
-            #    continue
-        
-            for const, df in list_df_f_obs.items():
-                #if const not in ['G']: continue
-                if const in self.list_df.keys():
-                    self.list_df[const] = pd.concat([self.list_df[const],df])
-                else:
-                    self.list_df[const] = df
-
-
-        const_to_del = []
-        for k in self.list_df.keys():
-            if k=="C": continue
-            const_to_del.append(k)
-        for const in const_to_del:
-            del self.list_df[const]
-            
+        '''                   
         
         ### GPS
         if 'G' in self.list_df.keys():
@@ -537,23 +514,25 @@ class tec:
 
             chan={}
 
-            if ("C1C" in list_cols) and ("C2W" in list_cols) and ("L1C" in list_cols) and ("L2W" in list_cols):
-                C1,C2,L1,L2 = "C1C","C2W","L1C","L2W"
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
+            if ("C1C" in list_cols) and ("C2W" in list_cols) and ("L1C" in list_cols) and ("L2W" in list_cols) and ("S1C" in list_cols) and ("S2W" in list_cols):
+                C1,C2,L1,L2,S1,S2 = "C1C","C2W","L1C","L2W","S1C","S2W"
+                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
             elif ("C1" in list_cols) and ("P2" in list_cols) and ("L1" in list_cols) and ("L2" in list_cols):
-                C1,C2,L1,L2 = "C1","P2","L1","L2"
-                chan = {"C1":"P1","C2":"P2","L1":"L1","L2":"L2"}
+                C1,C2,L1,L2,S1,S2 = "C1","P2","L1","L2","S1","S2"
+                chan = {"C1":"P1","C2":"P2","L1":"L1","L2":"L2","S1":"S1","S2":"S2"}
             elif ("P1" in list_cols) and ("P2" in list_cols) and ("L1" in list_cols) and ("L2" in list_cols):
-                C1,C2,L1,L2 = "P1","P2","L1","L2"
-                chan = {"C1":"P1","C2":"P2","L1":"L1","L2":"L2"}
+                C1,C2,L1,L2,S1,S2 = "P1","P2","L1","L2","S1","S2"
+                chan = {"C1":"P1","C2":"P2","L1":"L1","L2":"L2","S1":"S1","S2":"S2"}
 
             if chan:
 
                 self.channels[const] = []
                 self.channels[const].append(chan)
-                self.list_df[const].set_index("time",inplace=True)
+                #self.list_df[const].set_index("time",inplace=True)
                 self.t_min[const] = min(self.list_df[const].index)
-                self.t_max[const] = max(self.list_df[const].index)        
+                self.t_max[const] = max(self.list_df[const].index)  
+                
+                self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)      
                 
                 self.list_df[const]['STEC_l'] = (self.list_df[const][L1]*self.gps_lambda1-self.list_df[const][L2]*self.gps_lambda2)*self.gps_alpha/1e16
                 self.list_df[const]['STEC_p'] = (self.list_df[const][C2]-self.list_df[const][C1])*self.gps_alpha/1e16
@@ -576,19 +555,22 @@ class tec:
             if len(list_sv)==0: return   
 
             list_cols = self.list_df[const].columns
-
+            #print (const,list_cols)
+            
             chan = {}
-            if ("C1P" in list_cols) and ("C2P" in list_cols) and ("L1P" in list_cols) and ("L2P" in list_cols):
-                C1,C2,L1,L2 = "C1P","C2P","L1P","L2P"
+            if ("C1P" in list_cols) and ("C2P" in list_cols) and ("L1P" in list_cols) and ("L2P" in list_cols) and ("S1P" in list_cols) and ("S2P" in list_cols):
+                C1,C2,L1,L2,S1,S2 = "C1P","C2P","L1P","L2P","S1P","S2P"
                 for c in ['P','C']:
                     varc1 = 'C1'+c
                     if varc1 in list_cols:
                         C1 = varc1
+                        S1 = 'S1'+c
                         break
                 for c in ['P','C']:
                     varc2 = 'C2'+c
                     if varc2 in list_cols:
                         C2 = varc2
+                        S2 = 'S2'+c
                         break
                 for c in ['P','C']:
                     varc1 = 'L1'+c
@@ -600,9 +582,9 @@ class tec:
                     if varc2 in list_cols:
                         L2 = varc2
                         break  
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
+                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2,"S1":"S1","S2":"S2"}
             elif ("L1" in list_cols) and ("L2" in list_cols):
-                L1,L2 = "L1","L2"
+                L1,L2,S1,S2 = "L1","L2","S1","S2"
                 if ("P2" in list_cols):
                     C2="P2"
                     if ("P1" in list_cols): C1="P1"
@@ -611,13 +593,13 @@ class tec:
                     C2="C2"
                     if ("P1" in list_cols): C1="P1"
                     elif ("C1" in list_cols): C1="C1"
-                chan = {"C1":"P1","C2":"P2","L1":L1,"L2":L2}
+                chan = {"C1":"P1","C2":"P2","L1":L1,"L2":L2,"S1":"S1","S2":"S2"}
 
             if chan:
                 self.channels[const] = []
                 self.channels[const].append(chan)
                 
-                self.list_df[const].set_index("time",inplace=True)
+                #self.list_df[const].set_index("time",inplace=True)
                 self.t_min[const] = min(self.list_df[const].index)
                 self.t_max[const] = max(self.list_df[const].index)      
     
@@ -632,17 +614,21 @@ class tec:
                 self.list_df[const] = df_glonass.dropna(subset=[C1,C2,L1,L2])
                 self.list_df[const]["lambda1"] = csts.c/self.list_df[const]["f1"]
                 self.list_df[const]["lambda2"] = csts.c/self.list_df[const]["f2"]
-       
+                
+                self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)
+                
+                #print (self.list_df[const].columns)
+                
                 self.list_df[const]["STEC_p"] = (self.list_df[const][C2] - self.list_df[const][C1])*self.list_df[const]["alpha"]/1e16
                 self.list_df[const]["STEC_l"] = (self.list_df[const]["lambda1"]*self.list_df[const][L1] - \
                                                self.list_df[const]["lambda2"]*self.list_df[const][L2])*self.list_df[const]["alpha"]/1e16
-                
+                #print (self.list_df[const].columns)
                 self.list_df[const].dropna(subset=["STEC_p","STEC_l"],inplace=True)
                 
                 if len(self.list_df[const])!=0:
                     self.list_df[const]["C1"] = chan["C1"]
                     self.list_df[const]["C2"] = chan["C2"]
-                    #self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
+                    self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
                     self.t_min[const] = min(self.list_df[const].index)
                     self.t_max[const] = max(self.list_df[const].index)
             else: del self.list_df[const]
@@ -655,18 +641,24 @@ class tec:
             self.list_df[const] = self.list_df[const].dropna(axis=1, how='all')
             list_cols = self.list_df[const].columns
             
+            #print (const,self.list_df[const].columns)
+
+            
             C1, C2 = '', ''
             L1, L2 = '', ''
+            S1, S2 = '', ''
             chan = {}
             for c in ['C','X','A','B','Z']:
                 varc1 = 'C1'+c
                 if varc1 in list_cols:
                     C1 = varc1
+                    S1 = 'S1'+c
                     break
             for c in ['Q','X','I']:
                 varc2 = 'C5'+c
                 if varc2 in list_cols:
                     C2 = varc2
+                    S2 = 'S5'+c
                     break
             for c in ['C','X','A','B','Z']:
                 varc1 = 'L1'+c
@@ -678,19 +670,20 @@ class tec:
                 if varc2 in list_cols:
                     L2 = varc2
                     break
-            if (C1!='') and (C2!='') and (L1!='') and (L2!=''): 
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
+            if (C1!='') and (C2!='') and (L1!='') and (L2!='') and (S1!='') and (S2!=''): 
+                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
 
             if chan:
                 self.channels[const] = []
                 self.channels[const].append(chan)
                 
-                self.list_df[const].set_index("time",inplace=True)
+                #self.list_df[const].set_index("time",inplace=True)
                 self.list_df[const]["STEC_p"] = (self.list_df[const][C2] - self.list_df[const][C1])*self.gps_alpha/1e16
                 self.list_df[const]["STEC_l"] = (self.gps_lambda1*self.list_df[const][L1] - self.gps_lambda5*self.list_df[const][L2])*self.gps_alpha/1e16
                 self.list_df[const]["C1"] = chan["C1"]
                 self.list_df[const]["C2"] = chan["C2"]
-                self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
+                self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)
+                self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
                 #self.list_df['E'].dropna(inplace=True)
                 self.list_df[const] = self.list_df[const].dropna(subset=["STEC_l","STEC_p"])
                 
@@ -761,7 +754,7 @@ class tec:
 
 
             if len(self.list_df[const])!=0:
-                self.list_df[const].set_index("time",inplace=True)
+                #self.list_df[const].set_index("time",inplace=True)
                 #print (self.list_df[const])
                 self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
                 self.list_df[const].dropna(subset="STEC_l",inplace=True)         
@@ -775,16 +768,18 @@ class tec:
             
             self.list_df[const] = self.list_df[const].dropna(axis=1, how='all')
 
-            C1, C2, L1, L2 = '', '', '', ''
+            C1, C2, L1, L2, S1, S2 = '', '', '', '', '', ''
             for c in ['C','X','S','L','Z']:
                 varc1 = 'C1'+c
                 if varc1 in self.list_df[const].columns:
                     C1 = varc1
+                    S1 = 'S1'+c
                     break
             for c in ['Q','X','I']:
                 varc2 = 'C5'+c
                 if varc2 in self.list_df[const].columns:
                     C2 = varc2
+                    S2 = 'S2'+c
                     break
             for c in ['C','X','S','L','Z']:
                 varc1 = 'L1'+c
@@ -796,23 +791,24 @@ class tec:
                 if varc2 in self.list_df[const].columns:
                     L2 = varc2
                     break
-            if (C1!='') and (C2!='') and (L1!='') and (L2!=''): 
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
+            if (C1!='') and (C2!='') and (L1!='') and (L2!='') and (S1!='') and (S2!=''): 
+                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
                     
-            chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
+            #chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
 
             if chan:
                 self.channels[const] = []
                 self.channels[const].append(chan)
                 
                 qzss_alpha = self.gps_f1**2*self.gps_f5**2/(self.gps_f1**2-self.gps_f5**2)/40.318
-                self.list_df[const].set_index("time",inplace=True)
+                #self.list_df[const].set_index("time",inplace=True)
                 self.list_df[const]["STEC_l"] = (self.list_df[const][L1]*self.gps_lambda1-self.list_df[const][L2]*self.gps_lambda5)*qzss_alpha/1e16
                 self.list_df[const]["STEC_p"] = (self.list_df[const][C2]-self.list_df[const][C1])*qzss_alpha/1e16
                 self.list_df[const]["C1"] = chan["C1"]
                 self.list_df[const]["C2"] = chan["C2"]
+                self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)
                 self.list_df[const].dropna(subset=["STEC_l","STEC_p"],inplace=True)
-                self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
+                self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
 
                 self.t_min[const] = min(self.list_df[const].index)
                 self.t_max[const] = max(self.list_df[const].index)
@@ -839,7 +835,7 @@ class tec:
 
                 self.channels[const] = []
                 self.channels[const].append(chan)
-                self.list_df[const].set_index("time",inplace=True)
+                #self.list_df[const].set_index("time",inplace=True)
                 self.t_min[const] = min(self.list_df[const].index)
                 self.t_max[const] = max(self.list_df[const].index)        
 
@@ -884,6 +880,7 @@ class tec:
         dict_oper = {"S1": "mean", "S2": "mean", "STEC_l": "mean","STEC_p": "mean"}
         for const in self.list_df.keys():
             #self.list_df[const]=self.list_df[const].groupby(["sv","C1","C2"]).resample("1min").agg({"STEC_l": "mean","STEC_p": "mean"}).reset_index().set_index('time').dropna(subset=['STEC_l','STEC_p'])
+            #print (const)
             self.list_df[const]=self.list_df[const].groupby(["sv","C1","C2"]).resample("1min").agg(dict_oper).reset_index().set_index('time').dropna(subset=['STEC_l','STEC_p'])
             
             #self.list_df[const] = (
@@ -929,6 +926,7 @@ class tec:
            # print(f"RSS: {mem.rss / 1024**2:.2f} MB")
            # print(f"VMS: {mem.vms / 1024**2:.2f} MB")
            # print(f"list_df[{const}]: {sys.getsizeof(self.list_df[const])/ 1024**2:.2f} MB")
+            #print (self.list_df[const])
 
             self.list_df[const] = self.list_df[const][["sv","C1","C2","elevation","lat","lon","alt","S1","S2","STEC_l","STEC_p"]]
                         
@@ -936,8 +934,161 @@ class tec:
             del self.list_df[const]
             if const in self.channels.keys(): del self.channels[const]
         return True
+        
+    def list_leaps_series(self,series,tol_dev=0.2,tol_sig=10,N=5):
+    
+        series.dropna(inplace=True)
+	
+        indices = series.index
+        # Discard too short series
+        if len(series)<=N: return []        
+
+        # List time in seconds from first index of series
+        diffs = [0]
+        for i in range(len(series)-1):
+            diffs.append(diffs[-1]+(series.index[i+1]-series.index[i]).seconds)
+
+        list_series = series.tolist()
+        
+        tol_deviation=tol_dev*self.resolution
+
+        # List time in seconds from first index of series
+        diffs = [0]
+        for i in range(len(series)-1):
+            diffs.append(diffs[-1]+(series.index[i+1]-series.index[i]).seconds)
+        
+        s=0
+        
+        list_left_borders = []
+        list_right_borders = []
+
+        border = {'left':None, 'right':None}
+        
+        while s<len(series):
+            A,B,max_dev,mean_dev = fit_lin(diffs[s:s+N],series[s:s+N].values)
+            # Compute distance of point s and s+N+1 with fit
+            left_dev=float(abs(list_series[s-1]-A*diffs[s-1]-B)) if s>0 else 0
+            right_dev=float(abs(list_series[s+N]-A*diffs[s+N]-B)) if s+N<len(series) else 0
+            #list_fit_params[s]={"A":float(A),"B":float(B),"max_dev":float(max_dev),"left_dev":float(left_dev),"right_dev":float(right_dev)}
+ 
+            
+
+            
+            #Looking for left borders
+            # beginning of serie
+            if s==0: 
+                list_left_borders.append(0)
+                border['left'] = indices[0]
+            else:
+                left_dev=float(abs(list_series[s-1]-A*diffs[s-1]-B))
+                if left_dev>tol_deviation: 
+                    if len(list_left_borders)>0:
+                        t_segment_size = (indices[s]-indices[list_left_borders[-1]]).seconds
+                        n_segment_size = s - list_left_borders[-1]
+                        if (t_segment_size<=N*self.resolution) or (n_segment_size<=N):
+                            list_left_borders[-1]=s
+                            border['left']=indices[s]
+                            #else: 
+                        else: # Big enough to be considered as a segment
+                            list_left_borders.append(s)
+                            if border['left']==None or border['left']>indices[s-1]: 
+                                border['left']=indices[s]
+                                
+                            else:
+                                border['right'] = indices[s-1]
+                                print ('completed 1 ---------> ',border)
+                                border = {'left':indices[s], 'right':None}
+                    else:
+                        list_left_borders.append(s)
+                        border['left']=indices[s]
+                else:
+                    if border['left']==None: print ('PROBLEM in leap series, no left border found while running towards right border 11')
+                    else: border['right'] = indices[s-1]
+            
+            # Looking for right borders
+            if s==len(series)-1: 
+                list_right_borders.append(len(series)-1)
+                if border['left']!=None: 
+                    border['right']=indices[len(series)-1]
+                    print ('completed 2 ---------> ',border)
+                # else: last segment is useless because no left border, nothing to do here
+                print ('OUT')
+                return
+            else:
+                if s+N<len(series):
+                    right_dev=float(abs(list_series[s+N]-A*diffs[s+N]-B))
+                    if right_dev>tol_deviation: 
+                        if len(list_right_borders)>0:
+                            t_segment_size = (indices[s+N-1]-indices[list_right_borders[-1]]).seconds
+                            n_segment_size = s+N-1 - list_right_borders[-1]
+                            if (t_segment_size<=N*self.resolution) or (n_segment_size<=N):
+                                list_right_borders[-1]=list_right_borders[-1]#s+N-1
+                                #border['left']=indices[s+N-1]
+                                border = {'left':indices[s+N], 'right':None}
+                            else: 
+                                list_right_borders.append(s+N-1)
+                                if border['left']==None:
+                                    border = {'left':indices[s+N], 'right':None}
+                                else:
+                                    border['right'] = indices[s+N-1]
+                                    print ('completed 3---------> ',border)
+                                    border = {'left':indices[s+N], 'right':None}
+                            
+                        else: 
+                            list_right_borders.append(s+N-1)
+                            if border['left']==None:
+                                border = {'left':indices[s+N], 'right':None}
+                            else:
+                                border['right'] = indices[s+N-1]
+                                print ('completed 4---------> ',border)
+                                border = {'left':indices[s+N], 'right':None}
+                    else:
+                        if border['left']==None: print ('PROBLEM in leap series, no left border found while running towards right border 22')
+                        else: border['right'] = indices[s+N-1]                        
+                    
+            s+=1
+        
+        print ('left')
+        for l in list_left_borders: print (l,indices[l])
+        print ('right')
+        for r in list_right_borders: print (r,indices[r])
+        
+        sys.exit()
+        
+        border = {'left':None,'right':None}
+        s_left = 0
+        s_right = 0
+        while s_left<len(list_left_borders):
+            
+            if s_left+1<len(list_left_borders):
+                if list_left_borders[s_left+1]<list_right_borders[s_right]:
+                    right = list_left_borders[s_left+1]
+                else:
+                    right = list_right_borders[s_right]
+                    s_right = s_right+2                               
+            else:
+                right = list_right_borders[s_right]
+            border = {'left':list_left_borders[s_left] ,'right':right }
+            s_left = s_left+1
+            
+            #while list_left_borders[s_left]<list_right_borders[s_right]:
+            #    s_left+=1
+                
+            
+            #s_right+=1    
+            print (s_left,s_right,list_left_borders[s_left],list_left_borders[s_right],border,len(list_left_borders))
+            #s_left+=1
+        
+        
+        sys.exit()
+            
+                    
 
 
+            
+
+
+    '''
     def list_leaps_series(self,series,tol_dev=0.2,tol_sig=10,N_=5,debug=False):
        
 
@@ -1114,6 +1265,7 @@ class tec:
         print ('return, End of function')
         for b in list_borders: print (b['t_left'],b['t_right'])
         return list_borders
+        '''
 
 
 
@@ -1129,18 +1281,18 @@ class tec:
                 #break
                 
         #print ('sl')
-        borders_sl = self.list_leaps_series(df['STEC_l'],1/60,3,3,debug=False)
+        borders_sl = self.list_leaps_series(df['STEC_l'],1/60,3,3)
         #for b in borders_sl: print (b['t_left'],b['t_right'])
 
-        borders_slp = self.list_leaps_series(df['STEC_p'],tol_dev=2.5/6.,tol_sig=6,N_=8,debug=False)
+        #borders_slp = self.list_leaps_series(df['STEC_p'],tol_dev=2.5/6.,tol_sig=6,N=8)
         
         #print (df)
-        print ('*******************************************')
-        print ('sl')
-        for bord in borders_sl: print (bord)
-        print ('*******************************************') 	
-        print ('slp')
-        for bord in borders_slp: print (bord)
+        #print ('*******************************************')
+        #print ('sl')
+        #for bord in borders_sl: print (bord)
+        #print ('*******************************************') 	
+        #print ('slp')
+        #for bord in borders_slp: print (bord)
 
         sys.exit()
 
@@ -1200,7 +1352,7 @@ class tec:
 
             for sat in list_sv:
             
-                if sat!='C33': continue
+                if sat!='C14': continue
                 print (sat)
 
 
@@ -1840,6 +1992,7 @@ class tec:
             self.df_br = pd.concat([df_br_stored,self.df_br])
         self.df_br.to_csv(f_br)
 
+
     def add_receiver_bias(self):
         self.compute_receiver_bias()
         for const in self.list_df.keys():
@@ -1859,11 +2012,41 @@ class tec:
 
             self.list_df[const] = self.list_df[const].groupby(by=["time","sv"],as_index=False).mean()
 
-    def load_sat_DCB(self):
-        if len(self.list_f_dcb)==0: return pd.DataFrame()
-        else:
-            self.sat_dcb = DCB.load_dcb(self.list_f_dcb)
-            return
+    #def load_sat_DCB(self):
+
+            
+
+    #def load_sat_DCB(self):
+    #
+    #    # Case no DCB file is provided, we try downloading them
+    #    if len(self.list_f_dcb) == 0:
+    #    
+    #        directory_DCB_path = Path(st.root_dir+'DCB/')
+    #        list_sorted_DCB = []
+    #        for file in directory_DCB_path.rglob("*"): 
+    #            if file.is_file():
+    #                list_sorted_DCB.append(str(file.resolve()))
+    #        #list_sorted_DCB = sorted([file.resolve() for file in directory_DCB_path.rglob("*") if file.is_file()])
+    #        
+    #        for i in range((self.datemax.date() - self.datemin.date()).days + 1):
+    #            d = self.datemin.date() + datetime.timedelta(days=i)
+    #            year = d.year
+    #            doy = (d - datetime.date(year,1,1)).days + 1
+    #            DCB_file = st.root_dir+'DCB/' +str(year)+ "/CAS0MGXRAP_"+str(year)+str(doy)+"0000_01D_01D_DCB.BSX"
+    #            print (DCB_file)
+    #            print (list_sorted_DCB)
+    #            if (DCB_file not in list_sorted_DCB):
+    #                #print ("Should be here")
+    #                DCB.get_dcb_from_cddis(year,doy)
+    #            self.list_f_dcb.append(DCB_file)
+    #    #else: 
+    #        
+    #
+    #
+    #    if len(self.list_f_dcb)==0: return pd.DataFrame()
+    #    else:
+    #        self.sat_dcb = DCB.load_dcb(self.list_f_dcb)
+    #        return
         
     def to_feather(self):
         df_obs = pd.DataFrame()

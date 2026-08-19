@@ -16,21 +16,27 @@ The file for a given date is determined by its year+month (YYMM).
 import sys
 import os
 import argparse
-from datetime import datetime
+from datetime import datetime, date, timedelta
 import time
 import re
 from calendar import monthrange
 from ftplib import FTP, error_perm, all_errors
 from pathlib import Path
+#import gzip
+#import shutil
 
 import scipy.constants as csts
 import math
+
+#import requests
+#from bs4 import BeautifulSoup
 
 import pandas as pd
 from . import decompress
 from . import stations as st
 from . import freq
- 
+
+from . import igs
  
 # ── Constants ────────────────────────────────────────────────────────────────
  
@@ -40,8 +46,8 @@ RETRY_ATTEMPTS  = 3    # how many times to try each file
 RETRY_DELAY     = 5    # seconds to wait between retries
 INTER_FILE_DELAY = 2   # seconds to wait between successive files
 #DCB_dir = "C:\\Users\\User\\Documents\\GitHub\\pytec\\tests\\DCB\\"
-DCB_dir = st.root_dir + '/DCB/'
-os.makedirs(DCB_dir,exist_ok=True)
+
+
 
  
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -142,7 +148,7 @@ def _ftp_download_file(
                     print(f"  FAILED after {RETRY_ATTEMPTS} attempts: {exc}")
  
     return saved
- 
+    
  
 # ── Public API ────────────────────────────────────────────────────────────────
  
@@ -302,11 +308,6 @@ def read_dcb(dcb_path) -> pd.DataFrame:
         DCB   (float)           – P1-P2 differential code bias  [ns]
         STD   (float)           – RMS uncertainty of the DCB    [ns]
     """
-
-    #dcb_path = _dcb_local_path(date)
-    #if not os.path.exists(dcb_path):
-    #    download_dcb(date, dest_dir=DCB_dir)
-    #    print ("Downloaded path", dcb_path)
         
     path = Path(dcb_path)
 
@@ -348,17 +349,43 @@ def getBias_fromfile(sat,file,chanel1, chanel2):
             if splt_line[2]==sat:
                 if splt_line[3]==chanel1:
                     if splt_line[4]==chanel2:
-                        #print (sat,chanel1,chanel2,splt_line[8])
+                        #print (sat,chanel1,chanel2,splt_line[	8])
                         return float(splt_line[8])
     return float('NaN')
 
-def load_dcb(list_files):
+def load_dcb(list_files=None,datemin=None,datemax=None):
+
+    DCB_dir = st.root_dir + 'DCB/'
+    os.makedirs(DCB_dir,exist_ok=True)
+
+    list_used_dcb = []
+    # Case no DCB file is provided, we try downloading them
+    if (len(list_files) == 0) or (list_files is None):
+    
+        if (datemin is None) or (datemax is None): return pd.DataFrame()
+        
+        directory_DCB_path = Path(DCB_dir)
+        list_sorted_DCB = []
+        for file in directory_DCB_path.rglob("*"): 
+            if file.is_file():
+                list_sorted_DCB.append(str(file.resolve()))
+            
+        for i in range((datemax.date() - datemin.date()).days + 1):
+            d = datemin.date() + timedelta(days=i)
+            year = d.year
+            doy = (d - date(year,1,1)).days + 1
+            DCB_file = DCB_dir +str(year)+ "/CAS0MGXRAP_"+str(year)+str(doy)+"0000_01D_01D_DCB.BSX"
+            DCB_file = igs.get_dcb_from_cddis(year,doy,DCB_dir)
+            #print (DCB_file)
+            list_used_dcb.append(DCB_file)
+    else:
+        list_used_dcb = list_files
     
     df_dcb = pd.DataFrame()
     
-    for f in list_files:
+    for f in list_used_dcb:
         dict_dcb = {"time":[],"sv":[],"C1":[],"C2":[],"dcb":[],"std":[]}
-        if f[-3:]=="BIA":
+        if f[-3:]=="BIA" or f[-3:]=="BSX":
             #print (f)
             fsplit = f.split("_")
             strt = fsplit[-4]

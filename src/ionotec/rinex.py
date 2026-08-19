@@ -116,7 +116,7 @@ class rinex:
         self.dict_obs_name = {}
         self.dict_obs_shift = {}
         
-        self.vars_list = ['P2','P1','C2','C1','L1','L2']
+        self.vars_list = ['P2','P1','C2','C1','L1','L2','S1','S2']
         
     
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -237,9 +237,12 @@ class rinex:
             if "COMPACT" in self.header['type_rinex']:
                 #self.read_obs_rinexv2()
                 for constellation in ['G','R']:
+                    #print (constellation)
+                    #print (self.vars_list)
                     obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
                     df_temp = obs.to_dataframe()
                     df_temp.reset_index(inplace=True)
+                    #print (df_temp)
                     self.list_df[constellation] = df_temp                    
                # for const in self.list_df.keys():
                 #    print (self.list_df[const])
@@ -248,6 +251,7 @@ class rinex:
             if self.header['type']=='O':     
                 for constellation in ['G','R']:
                 #for constellation in ['G']:
+                    #print (self.vars_list)
                     obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
                     df_temp = obs.to_dataframe()
                     df_temp.reset_index(inplace=True)
