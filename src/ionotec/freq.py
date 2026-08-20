@@ -1,5 +1,12 @@
+import scipy.constants as csts
+
 # Channels of the glonass constellation per satellite ("k" values)
  #https://glonass-iac.ru/en/cus/
+
+gps_f1, gps_f2, gps_f5 = 1575.42 * 1e6, 1227.60 * 1e6, 1176.45e6
+gps_lambda1, gps_lambda2, gps_lambda5 = csts.c/gps_f1, csts.c/gps_f2, csts.c/gps_f5
+gps_alpha = gps_f1**2*gps_f2**2/(gps_f1**2-gps_f2**2)/40.318
+
 glonass_f1,glonass_f2 = 1602 * 1e6, 1246 * 1e6
 
 channel_glonass = {"R01":1,"R02":-4,"R03":5,"R04":6,"R05":1,"R06":-4,"R07":5,"R08":6,

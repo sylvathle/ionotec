@@ -353,33 +353,28 @@ def getBias_fromfile(sat,file,chanel1, chanel2):
                         return float(splt_line[8])
     return float('NaN')
 
-def load_dcb(list_files=None,datemin=None,datemax=None):
+def load_dcb(datemin=None,datemax=None):
 
     DCB_dir = st.root_dir + 'DCB/'
     os.makedirs(DCB_dir,exist_ok=True)
 
     list_used_dcb = []
-    # Case no DCB file is provided, we try downloading them
-    if (len(list_files) == 0) or (list_files is None):
     
-        if (datemin is None) or (datemax is None): return pd.DataFrame()
+    if (datemin is None) or (datemax is None): return pd.DataFrame()
         
-        directory_DCB_path = Path(DCB_dir)
-        list_sorted_DCB = []
-        for file in directory_DCB_path.rglob("*"): 
-            if file.is_file():
-                list_sorted_DCB.append(str(file.resolve()))
+    directory_DCB_path = Path(DCB_dir)
+    list_sorted_DCB = []
+    for file in directory_DCB_path.rglob("*"): 
+        if file.is_file():
+            list_sorted_DCB.append(str(file.resolve()))
             
-        for i in range((datemax.date() - datemin.date()).days + 1):
-            d = datemin.date() + timedelta(days=i)
-            year = d.year
-            doy = (d - date(year,1,1)).days + 1
-            DCB_file = DCB_dir +str(year)+ "/CAS0MGXRAP_"+str(year)+str(doy)+"0000_01D_01D_DCB.BSX"
-            DCB_file = igs.get_dcb_from_cddis(year,doy,DCB_dir)
-            #print (DCB_file)
-            list_used_dcb.append(DCB_file)
-    else:
-        list_used_dcb = list_files
+    for i in range((datemax.date() - datemin.date()).days + 1):
+        d = datemin.date() + timedelta(days=i)
+        year = d.year
+        doy = (d - date(year,1,1)).days + 1
+        DCB_file = DCB_dir +str(year)+ "/CAS0MGXRAP_"+str(year)+str(doy)+"0000_01D_01D_DCB.BSX"
+        DCB_file = igs.get_dcb_from_cddis(year,doy,DCB_dir)
+        list_used_dcb.append(DCB_file)
     
     df_dcb = pd.DataFrame()
     
@@ -400,11 +395,14 @@ def load_dcb(list_files=None,datemin=None,datemax=None):
                     sv = splt_line[2]
                     if len(sv)!=3: continue    
                     ns_to_tecu = freq.getAlpha(sv,splt_line[3],splt_line[4]) * csts.c * 1e-9  / 1e16
+                    
                     if math.isnan(ns_to_tecu): continue
+                    #ns_to_tecu = 1
                     dict_dcb["time"].append(date_obj)
                     dict_dcb["sv"].append(splt_line[2])
                     dict_dcb["C1"].append(splt_line[3])
                     dict_dcb["C2"].append(splt_line[4])
+
                     
                     dict_dcb["dcb"].append(float(splt_line[-2])*ns_to_tecu)
                     dict_dcb["std"].append(float(splt_line[-1])*ns_to_tecu)
@@ -417,7 +415,7 @@ def load_dcb(list_files=None,datemin=None,datemax=None):
             #print ("Need to implement load of ",f)
     
     df_dcb['time'] = pd.to_datetime(df_dcb['time'])
-    df_dcb.set_index('time',inplace=True)
+    #df_dcb.set_index('time',inplace=True)
     #print (df_dcb)
     #sys.exit()
     return df_dcb

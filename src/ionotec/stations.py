@@ -44,8 +44,8 @@ from pathlib import Path
 # create output dir
 base_dir = Path(sys.argv[0]).resolve().parent
 target_dir = base_dir / "output/"
-target_dir.mkdir(parents=True, exist_ok=True)
-print ("Output directory is :",target_dir)
+#target_dir.mkdir(parents=True, exist_ok=True)
+#print ("Output directory is :",target_dir)
 root_dir = str(target_dir)+"/"
 
 #print ("root_dir", root_dir)

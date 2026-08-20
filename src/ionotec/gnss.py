@@ -705,7 +705,7 @@ class gnss:
                 with pd.option_context('display.max_rows', None, 'display.max_columns', None):
                     self.df_nav_gnss[const][ (self.df_nav_gnss[const]['sv']=="R16") & (self.df_nav_gnss[const].index>datetime.datetime(2024,5,9,12,0,0,0)) & (self.df_nav_gnss[const].index<datetime.datetime(2024,5,9,18,0,0,0))].to_csv('R16.csv')
             
-            df_nav, flags = filter_corrupted_nav_rows(df_nav)
+            #df_nav, flags = filter_corrupted_nav_rows(df_nav)
 
 
             for sv in list_sv:

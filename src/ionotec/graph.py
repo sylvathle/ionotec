@@ -102,8 +102,8 @@ def plot_station(df_station,station_name,mozaic=False):
         #ax_inset.set_xticks([])
         #ax_inset.set_yticks([])
  
-        df_stations = pd.read_csv(stations.csv_stations).set_index("station")
-        pos = df_stations.loc[station_name]
+        #df_stations = pd.read_csv(stations.csv_stations).set_index("station")
+        #pos = df_stations.loc[station_name]
 
         #request = cimgt.QuadtreeTiles()
         #sys.exit()
