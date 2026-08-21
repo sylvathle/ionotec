@@ -508,7 +508,7 @@ class gnss:
         self.list_constellation = []
         
         
-        for sv in ["C57","C58"]:
+        for sv in ["C56","C57","C58","C59"]:
             if sv in list_satellites:
                 list_satellites.remove(sv)
         
@@ -571,7 +571,12 @@ class gnss:
             year = d.year
             doy = (d.date() - datetime.date(year,1,1)).days + 1
             n_files_ready = 0
+
+            print (d)
+            print (list_satellites)
+                
             for c in list_const_suff:
+                print (list_const_suff)
                 suff = str(year-2000)+c                    
                    
                 directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
@@ -591,6 +596,16 @@ class gnss:
                         for f in list_downloaded:
                             if Path(f) not in f_nav:
                                 f_nav.append(Path(f))
+
+            print ('Will try with guam')
+            if "C01" in list_satellites:
+                suff = str(year-2000)+'f'
+                directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
+                if os.path.exists(directory_GNSS_path_const):
+                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='guam',nfirst=n_file_downloaded-n_files_ready)
+                    for f in list_downloaded:
+                        if Path(f) not in f_nav: f_nav.append(Path(f))
+                
                 
             d += datetime.timedelta(days=1)
                 

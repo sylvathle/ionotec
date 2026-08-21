@@ -70,8 +70,11 @@ def get_rinex_from_cddis(year,doy,suff,DEST_DIR_BASE,station='',nfirst=-1):
         if (".rnx" not in href and ".crx" not in href):
             continue
     
-        if station in href:
-            links.append(href.strip())
+        print (station,href)
+        print (href.strip())
+        if station in href.lower(): links.append(href.strip())
+        else: continue
+   
 
         splthref = href.split('.')
         suff = splthref[0]
@@ -85,7 +88,7 @@ def get_rinex_from_cddis(year,doy,suff,DEST_DIR_BASE,station='',nfirst=-1):
     #print(f"Found {len(links)} files")
     if len(links)==0: 
         print ("No file for ",station,suff)
-        return
+        return []
     #headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:39.0)'}
     if nfirst==-1: nfirst =len(links)
 
