@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: ionotec
-Version: 0.0.18
+Version: 0.0.20
 Summary: Code calculating TEC from RINEX information
 Author-email: Sylvain Blunier <sylvain.blunier@gmail.com>
 License-Expression: MIT
@@ -18,6 +18,8 @@ Requires-Dist: pymap3d
 Requires-Dist: datetime
 Requires-Dist: scipy
 Requires-Dist: pyarrow
+Requires-Dist: requests
+Requires-Dist: beautifulsoup4
 Requires-Dist: matplotlib
 Requires-Dist: cartopy
 Dynamic: license-file

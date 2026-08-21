@@ -7,6 +7,8 @@ src/ionotec/decompress.py
 src/ionotec/freq.py
 src/ionotec/gnss.py
 src/ionotec/graph.py
+src/ionotec/igs.py
+src/ionotec/reconstruction.py
 src/ionotec/rinex.py
 src/ionotec/stations.py
 src/ionotec/tec.py
@@ -15,3 +17,4 @@ src/ionotec.egg-info/SOURCES.txt
 src/ionotec.egg-info/dependency_links.txt
 src/ionotec.egg-info/requires.txt
 src/ionotec.egg-info/top_level.txt
+test/testIonotec.py

@@ -1,6 +1,6 @@
 [project]
 name = "ionotec"
-version = "0.0.18"
+version = "0.0.20"
 authors = [
   { name="Sylvain Blunier", email="sylvain.blunier@gmail.com" },
 ]
@@ -14,7 +14,7 @@ classifiers = [
 
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
-dependencies = [ "georinex", "numpy", "pandas", "pymap3d", "datetime", "scipy", "pyarrow", "matplotlib", "cartopy" ]
+dependencies = [ "georinex", "numpy", "pandas", "pymap3d", "datetime", "scipy", "pyarrow", "requests", "beautifulsoup4", "matplotlib", "cartopy" ]
 
 [project.urls]
 Homepage = "https://github.com/sylvathle/ionotec"

@@ -42,7 +42,7 @@ simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
 from pathlib import Path
 
-import psutil
+#import psutil
 
 
 #import gzip
@@ -482,7 +482,7 @@ class gnss:
     f_doy_reported = ""
     
     
-    def __init__(self,f_nav=[],datemin=None, datemax=None, list_satellites=[],reprocess=False):
+    def __init__(self,datemin=None, datemax=None, list_satellites=[],reprocess=False):
         self.gnss_dir = st.root_dir + "GNSS/"
         
         if not os.path.exists(self.gnss_dir):
@@ -560,40 +560,39 @@ class gnss:
             #print ("Not need to reprocess GNSS position")
             return
             
-        n_file_downloaded = 10
+        n_file_downloaded = 15
     
         directory_GNSS_path = Path(self.gnss_dir)
         
-        # Case no DCB file is provided, we try downloading them
-        if len(f_nav) == 0:            
+        f_nav = []
             
-            d = self.datemin-datetime.timedelta(days=1)
-            while d<self.datemax+datetime.timedelta(days=1):
-                year = d.year
-                doy = (d.date() - datetime.date(year,1,1)).days + 1
-                n_files_ready = 0
-                for c in list_const_suff:
-                    suff = str(year-2000)+c                    
+        d = self.datemin-datetime.timedelta(days=1)
+        while d<self.datemax+datetime.timedelta(days=1):
+            year = d.year
+            doy = (d.date() - datetime.date(year,1,1)).days + 1
+            n_files_ready = 0
+            for c in list_const_suff:
+                suff = str(year-2000)+c                    
+                   
+                directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
+                if not os.path.exists(directory_GNSS_path_const):
+                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded-n_files_ready)
+                    for f in list_downloaded:
+                        f_nav.append(Path(f))
+                else: 
                     
-                    directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
-                    if not os.path.exists(directory_GNSS_path_const):
+                    listnav_year_doy_suff = []
+                    for file in directory_GNSS_path_const.iterdir(): 
+                        if file.is_file(): listnav_year_doy_suff.append(file)
+                    f_nav += listnav_year_doy_suff
+                    n_files_ready = len(listnav_year_doy_suff)
+                    if len(listnav_year_doy_suff)<n_file_downloaded: 
                         list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded-n_files_ready)
                         for f in list_downloaded:
-                            f_nav.append(Path(f))
-                    else: 
-                    
-                        listnav_year_doy_suff = []
-                        for file in directory_GNSS_path_const.iterdir(): 
-                            if file.is_file(): listnav_year_doy_suff.append(file)
-                        f_nav += listnav_year_doy_suff
-                        n_files_ready = len(listnav_year_doy_suff)
-                        if len(listnav_year_doy_suff)<n_file_downloaded: 
-                            list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded-n_files_ready)
-                            for f in list_downloaded:
-                                if Path(f) not in f_nav:
-                                    f_nav.append(Path(f))
+                            if Path(f) not in f_nav:
+                                f_nav.append(Path(f))
                 
-                d += datetime.timedelta(days=1)
+            d += datetime.timedelta(days=1)
                 
         self.list_f_rinex_nav = f_nav
       

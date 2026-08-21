@@ -5,5 +5,7 @@ pymap3d
 datetime
 scipy
 pyarrow
+requests
+beautifulsoup4
 matplotlib
 cartopy

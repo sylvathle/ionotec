@@ -87,7 +87,7 @@ class tec:
 
     def set_root_dir(self,root_dir):
         st.root_dir = root_dir
-        st.root_dir.mkdir(parents=True, exist_ok=True)
+        Path(st.root_dir).mkdir(parents=True, exist_ok=True)
 
     def set_rDCB_interval(self,rdcb_interval): self.rDCB_interval = rdcb_interval
 
@@ -921,7 +921,6 @@ class tec_station:
         #self.channels = {}
         self.h = h
         self.rDCB_interval = rdcb_interval
-        print (rdcb_interval)
 
         print ("Load files")
         self.load_files()
