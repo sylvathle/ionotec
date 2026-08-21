@@ -55,7 +55,7 @@ def get_rinex_from_cddis(year,doy,suff,DEST_DIR_BASE,station='',nfirst=-1):
                 print(f"Failed to contact {BASE_URL} after {elapsed:.1f} s: {e}")
                 return
     
-            print(f"Concat failed ({e}). Retrying in 1 second...")
+            #print(f"Concat failed ({e}). Retrying in 1 second...")
             time.sleep(1)
         
 
@@ -70,8 +70,8 @@ def get_rinex_from_cddis(year,doy,suff,DEST_DIR_BASE,station='',nfirst=-1):
         if (".rnx" not in href and ".crx" not in href):
             continue
     
-        print (station,href)
-        print (href.strip())
+        #print (station,href)
+        #print (href.strip())
         if station in href.lower(): links.append(href.strip())
         else: continue
    

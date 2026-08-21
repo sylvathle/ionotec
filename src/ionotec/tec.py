@@ -601,6 +601,7 @@ class tec_station:
             const = 'J'
             
             self.list_df[const] = self.list_df[const].dropna(axis=1, how='all')
+            chan = {}
 
             C1, C2, L1, L2, S1, S2 = '', '', '', '', '', ''
             for c in ['C','X','S','L','Z']:
@@ -613,7 +614,7 @@ class tec_station:
                 varc2 = 'C5'+c
                 if varc2 in self.list_df[const].columns:
                     C2 = varc2
-                    S2 = 'S2'+c
+                    S2 = 'S5'+c
                     break
             for c in ['C','X','S','L','Z']:
                 varc1 = 'L1'+c
@@ -634,6 +635,11 @@ class tec_station:
                 self.channels[const] = []
                 self.channels[const].append(chan)
                 
+                #print (chan)
+                #print (self.list_df[const].columns)
+                #print (self.list_df[const])
+
+                
                 qzss_alpha = freq.gps_f1**2*freq.gps_f5**2/(freq.gps_f1**2-freq.gps_f5**2)/40.318
                 #self.list_df[const].set_index("time",inplace=True)
                 self.list_df[const]["STEC_l"] = (self.list_df[const][L1]*freq.gps_lambda1-self.list_df[const][L2]*freq.gps_lambda5)*qzss_alpha/1e16
@@ -641,6 +647,8 @@ class tec_station:
                 self.list_df[const]["C1"] = chan["C1"]
                 self.list_df[const]["C2"] = chan["C2"]
                 self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)
+
+                print (self.list_df[const].columns)
                 self.list_df[const].dropna(subset=["STEC_l","STEC_p"],inplace=True)
                 self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
 
@@ -742,6 +750,8 @@ class tec_station:
     
         N_min_stec_p = 10
         signal_strength_threshold = 38
+
+        const_to_del = []
     
         for const, df_data in self.list_df.items():
 
@@ -804,6 +814,10 @@ class tec_station:
             
             self.list_df[const] = df_sats_corrected
 
+            if len(self.list_df[const])==0: 
+                const_to_del.append(const)
+                continue
+
             self.list_df[const]['time_day'] = self.list_df[const].index.normalize()
             self.list_df[const].reset_index(inplace=True)   # 'time' becomes a column
 
@@ -823,6 +837,9 @@ class tec_station:
 
             self.list_df[const]["STEC_l"] += self.list_df[const]["dcb"]
             self.list_df[const]["VTEC"]=self.list_df[const]["STEC_l"]*self.list_df[const]['cos_chi']
+
+        for const in const_to_del:
+            del self.list_df[const]
 
 
 

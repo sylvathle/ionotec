@@ -17,4 +17,3 @@ src/ionotec.egg-info/SOURCES.txt
 src/ionotec.egg-info/dependency_links.txt
 src/ionotec.egg-info/requires.txt
 src/ionotec.egg-info/top_level.txt
-test/testIonotec.py

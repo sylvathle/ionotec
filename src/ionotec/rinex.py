@@ -654,6 +654,7 @@ class rinex:
             self.dict_obs[constellation].append(obs_item)
 
 
+
         for constellation, observations in self.dict_obs.items():
             if constellation in ['I']: continue
             self.list_df[constellation] = pd.DataFrame(observations)
@@ -663,6 +664,7 @@ class rinex:
             del self.list_df["I"]  
         if "all" in self.list_df.keys():
             del self.list_df["all"]   
+
 
     def read_nav3_ephemerids(self):
 

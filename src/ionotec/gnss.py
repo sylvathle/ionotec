@@ -477,9 +477,9 @@ class gnss:
 
     list_f_rinex_nav = []
 
-    rinex_doy = 1
-    rinex_year = 2020
-    f_doy_reported = ""
+    #rinex_doy = 1
+    #rinex_year = 2020
+    #f_doy_reported = ""
     
     
     def __init__(self,datemin=None, datemax=None, list_satellites=[],reprocess=False):
@@ -506,9 +506,11 @@ class gnss:
         """       
         convert_sv0_suff0 = {'G':'n','R':'g','E':'l','J':'q','S':'h','C':'f','I':'i'}
         self.list_constellation = []
+
+        self.list_excluded_satellites = ["C56","C57","C58","C61","J06"]
         
         
-        for sv in ["C56","C57","C58","C59"]:
+        for sv in self.list_excluded_satellites:
             if sv in list_satellites:
                 list_satellites.remove(sv)
         
@@ -520,7 +522,6 @@ class gnss:
               self.list_constellation.append(sv[0])
               
               
-        #print ('list_const', list_const_suff,self.list_constellation)
         self.datemin = datemin
         self.datemax = datemax
         
@@ -533,7 +534,6 @@ class gnss:
 
         
 
-        #print (self.datemin,self.datemax)
         
         need_more_process = False
         d = self.datemin
@@ -560,7 +560,7 @@ class gnss:
             #print ("Not need to reprocess GNSS position")
             return
             
-        n_file_downloaded = 15
+        n_file_downloaded = {'n':12,'g':12,'l':14,'q':12,'f':12,'i':12}
     
         directory_GNSS_path = Path(self.gnss_dir)
         
@@ -572,15 +572,17 @@ class gnss:
             doy = (d.date() - datetime.date(year,1,1)).days + 1
             n_files_ready = 0
 
-            print (d)
-            print (list_satellites)
+            #print (d)
+            #print (list_satellites)
                 
             for c in list_const_suff:
-                print (list_const_suff)
                 suff = str(year-2000)+c                    
                    
                 directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
                 if not os.path.exists(directory_GNSS_path_const):
+                    #if c=='f':
+                    #    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=-1)
+                    #else:
                     list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded-n_files_ready)
                     for f in list_downloaded:
                         f_nav.append(Path(f))
@@ -591,18 +593,29 @@ class gnss:
                         if file.is_file(): listnav_year_doy_suff.append(file)
                     f_nav += listnav_year_doy_suff
                     n_files_ready = len(listnav_year_doy_suff)
-                    if len(listnav_year_doy_suff)<n_file_downloaded: 
-                        list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded-n_files_ready)
+                    if len(listnav_year_doy_suff)<n_file_downloaded[c]: 
+                        #list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded-n_files_ready)
+                        #if c=='f':
+                        #    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=-1)
+                        #else:
+                        list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded[c]-n_files_ready)
                         for f in list_downloaded:
                             if Path(f) not in f_nav:
                                 f_nav.append(Path(f))
 
-            print ('Will try with guam')
             if "C01" in list_satellites:
                 suff = str(year-2000)+'f'
                 directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
                 if os.path.exists(directory_GNSS_path_const):
-                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='guam',nfirst=n_file_downloaded-n_files_ready)
+                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='guam',nfirst=1)
+                    for f in list_downloaded:
+                        if Path(f) not in f_nav: f_nav.append(Path(f))
+
+            if "C61" in list_satellites:
+                suff = str(year-2000)+'f'
+                directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
+                if os.path.exists(directory_GNSS_path_const):
+                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='cibg',nfirst=1)
                     for f in list_downloaded:
                         if Path(f) not in f_nav: f_nav.append(Path(f))
                 
@@ -644,20 +657,6 @@ class gnss:
             df_nav.reset_index(level=["sv"],inplace=True)
             
             
-            #print (df_nav[ (df_nav['sv']=="G13")])
-            
-            #print (flags)
-            #print (f_rinex_nav)
-            #print (df_nav[ (df_nav['sv']=="R16")])
-            
-            
-            #df_G13 = df_nav[ (df_nav['sv']=="G13")]
-
-            #if len(df_G13)!=0:
-            #    print (f_rinex_nav)
-            #    print (df_nav[ (df_nav['sv']=="G13")].columns)
-
-
             for c in df_nav.columns:
                 if 'spare' in c:
                     df_nav.drop(columns=[c],inplace=True)
@@ -693,7 +692,6 @@ class gnss:
             time_list.append(t)
             t = t+datetime.timedelta(seconds=self.resolution)
 
-        #print (time_list[0],time_list[-1])
 
 
         for const in self.df_nav_gnss.keys():
@@ -712,7 +710,6 @@ class gnss:
             
             self.df_nav_gnss[const] = self.df_nav_gnss[const].groupby(["time","sv"]).mean()
             self.df_nav_gnss[const].reset_index(level=["sv"],inplace=True)
-            #print (self.df_nav_gnss[const])
             
             
             if const=='R':
@@ -723,7 +720,7 @@ class gnss:
 
 
             for sv in list_sv:
-                if sv in ["C57","C58"]: continue
+                if sv in self.list_excluded_satellites: continue
                 print (sv)
 
                 if len(sv)>3: continue
@@ -738,7 +735,6 @@ class gnss:
                     dict_sat_pos = {"time":[],"X":[],"Y":[],"Z":[]}
                     df_sat = df_sat[df_sat['sqrtA']!=0]
                     for t_nav, row in df_sat.iterrows():
-                        #if sv=="G14": print (t_nav)
                         # Calculate position for each time in time_list that are before the next available position information
                         while date < t_nav and i_time_list<len(time_list):
                             #print (date,t_nav)
