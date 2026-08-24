@@ -201,8 +201,7 @@ def correct_signal(df_arc):
     ### Remove data between segments
     # if no border is found, indicate nothing healthy here, remove and continue
     if len(borders_stecl)==0:
-        df_arc["STEC_l"] = np.nan
-        return df_arc
+        return df_arc.head(0)
 
     filter_erractic_segments = (df_arc.index<borders_stecl[0][0])
     df_arc[filter_erractic_segments] = np.nan    
@@ -282,8 +281,8 @@ def correct_signal(df_arc):
                 iborder-=1
         iborder+=1
 
-    if not arc_anchored:
-        df_arc['STEC_l']=np.nan
+    if not arc_anchored: df_arc['STEC_l']=np.nan
+    df_arc.dropna(subset=['STEC_l'],inplace=True)
                      
     return df_arc
     

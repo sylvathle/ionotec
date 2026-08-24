@@ -514,7 +514,8 @@ class tec_station:
                 self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)
                 self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
                 #self.list_df['E'].dropna(inplace=True)
-                self.list_df[const] = self.list_df[const].dropna(subset=["STEC_l","STEC_p"])
+                self.list_df[const] = self.list_df[const].dropna(subset=["STEC_l","STEC_p"],how='any')
+
                 
                 #self.t_min[const] = min(self.list_df[const].index)
                 #self.t_max[const] = max(self.list_df[const].index)
@@ -866,8 +867,9 @@ class tec_station:
                     df_interval_chanel = self.list_df[const][chanel_process_mask]      
                     
                     if len(df_interval_chanel)==0: continue              
-                
+
                     rDCB = reco.process_receiver_dcb(df_interval_chanel,elevation_filter = 10)
+
                     self.list_df[const].loc[chanel_process_mask, "rDCB"] = rDCB
 
                     dict_rDCB['station'].append(self.station)
@@ -891,7 +893,8 @@ class tec_station:
             df_br_stored = df_br_stored[df_br_stored.index!=self.station]
             self.df_br = pd.concat([df_br_stored,self.df_br])
         self.df_br.to_csv(f_br)
-        
+
+        const_to_del = []
         
         ## Correct STEC and VTEC with rDCB
         for const in self.list_df.keys():
@@ -903,6 +906,10 @@ class tec_station:
                 #np.cos(np.arcsin(R_E*np.cos(self.list_df[const]["elevation"])/(R_E+self.h)))
 
             self.list_df[const].reset_index(inplace=True)
+            self.list_df[const].dropna('STEC',inplace=True)
+            if len(self_df[const])==0:
+                const_to_del.append(const)
+                continue
             self.list_df[const] = self.list_df[const][["time","sv","lat","lon","elevation","cos_chi","STEC_l","STEC","VTEC","rDCB","dcb"]]
             #else:
             #    self.list_df[const].reset_index(inplace=True)
@@ -910,6 +917,9 @@ class tec_station:
 
             self.list_df[const] = self.list_df[const].groupby(by=["time","sv"],as_index=False).mean()
             self.list_df[const].set_index('time',inplace=True)
+
+       for const in const_to_del:
+           del self.list_df[const]
 
         
     def to_feather(self):
@@ -934,7 +944,7 @@ class tec_station:
 
         print ("Load files")
         self.load_files()
-     
+
         print ("RINEX to STEC")
         self.rinex_to_stec()
         
@@ -954,6 +964,8 @@ class tec_station:
                df_obs,
                self.list_df[const][["sv","lat","lon","elevation","cos_chi","STEC","VTEC"]]
             ])
+
+        
             
 
         if len(df_obs)>0:
