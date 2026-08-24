@@ -906,8 +906,8 @@ class tec_station:
                 #np.cos(np.arcsin(R_E*np.cos(self.list_df[const]["elevation"])/(R_E+self.h)))
 
             self.list_df[const].reset_index(inplace=True)
-            self.list_df[const].dropna('STEC',inplace=True)
-            if len(self_df[const])==0:
+            self.list_df[const].dropna(subset=['STEC'],inplace=True)
+            if len(self.list_df[const])==0:
                 const_to_del.append(const)
                 continue
             self.list_df[const] = self.list_df[const][["time","sv","lat","lon","elevation","cos_chi","STEC_l","STEC","VTEC","rDCB","dcb"]]
@@ -918,8 +918,8 @@ class tec_station:
             self.list_df[const] = self.list_df[const].groupby(by=["time","sv"],as_index=False).mean()
             self.list_df[const].set_index('time',inplace=True)
 
-       for const in const_to_del:
-           del self.list_df[const]
+        for const in const_to_del:
+            del self.list_df[const]
 
         
     def to_feather(self):
