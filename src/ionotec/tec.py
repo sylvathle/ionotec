@@ -365,7 +365,7 @@ class tec_station:
                 self.list_df[const]["C2"] = chan["C2"]
                 
 
-            else: del self.list[const]
+            else: del self.list_df[const]
 
             
         ### GLONASS
@@ -504,6 +504,7 @@ class tec_station:
                     break
             if (C1!='') and (C2!='') and (L1!='') and (L2!='') and (S1!='') and (S2!=''): 
                 chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
+            if not ((S1 in list_cols) or (S1 in list_cols)): chan = {}
 
             if chan:
                 self.channels[const] = []
@@ -514,6 +515,8 @@ class tec_station:
                 self.list_df[const]["STEC_l"] = (freq.gps_lambda1*self.list_df[const][L1] - freq.gps_lambda5*self.list_df[const][L2])*freq.gps_alpha/1e16
                 self.list_df[const]["C1"] = chan["C1"]
                 self.list_df[const]["C2"] = chan["C2"]
+                print (chan)
+                print (self.list_df[const].columns)
                 self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)
                 self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
                 #self.list_df['E'].dropna(inplace=True)
@@ -550,7 +553,7 @@ class tec_station:
             
             df_beidu_2_6 = pd.DataFrame()
             df_beidu_2_7 = pd.DataFrame()
-            if ("L2I" in beidu_columns) and ("L7I" in beidu_columns) and ("C7I" in beidu_columns) and ("C2I" in beidu_columns):
+            if ("L2I" in beidu_columns) and ("L7I" in beidu_columns) and ("C7I" in beidu_columns) and ("C2I" in beidu_columns) and ('S2I' in beidu_columns) and ('S7I' in beidu_columns):
                 C1,C2 = 'C2I','C7I'
                 L1,L2 = 'L2I','L7I'
                 df_beidu_2_7 = pd.DataFrame()
@@ -565,7 +568,8 @@ class tec_station:
                 df_beidu_2_7.dropna(subset="STEC_l",inplace=True)
                 if len(df_beidu_2_7)!=0: 
                     self.channels[const].append(chan)
-            if ("L2I" in beidu_columns) and ("L6I" in beidu_columns) and ("C6I" in beidu_columns) and ("C2I" in beidu_columns):
+
+            if ("L2I" in beidu_columns) and ("L6I" in beidu_columns) and ("C6I" in beidu_columns) and ("C2I" in beidu_columns) and ('S2I' in beidu_columns) and ('S6I' in beidu_columns):
                 C1,C2 = 'C2I','C6I'
                 L1,L2 = 'L2I','L6I'
                 df_beidu_2_6 = pd.DataFrame()
@@ -876,6 +880,8 @@ class tec_station:
                 
                     rDCB = reco.process_receiver_dcb(df_interval_chanel,elevation_filter = 60)
                     self.list_df[const].loc[chanel_process_mask, "rDCB"] = rDCB
+
+                    print (df_interval_chanel)
         
                     dict_rDCB['station'].append(self.station)
                     dict_rDCB['time_i'].append(min(df_interval_chanel.index))
@@ -963,15 +969,17 @@ class tec_station:
             ])
             
 
-        if store:
-            for year in df_obs.index.year.unique():
-                # Filter the dataframe for the current year
-                df_year = df_obs[df_obs.index.year == year]
-                folder = st.root_dir + "TEC/" + str(year) + "/"
-                Path(folder).mkdir(parents=True, exist_ok=True)
-                feather_path = folder + self.station
-                df_year.to_feather(feather_path+".feather")
-
-        return df_obs.dropna(subset=["STEC","VTEC"])
+        if len(df_obs)>0:
+            if store:
+                for year in df_obs.index.year.unique():
+                    # Filter the dataframe for the current year
+                    df_year = df_obs[df_obs.index.year == year]
+                    folder = st.root_dir + "TEC/" + str(year) + "/"
+                    Path(folder).mkdir(parents=True, exist_ok=True)
+                    feather_path = folder + self.station
+                    df_year.to_feather(feather_path+".feather")
+            return df_obs.dropna(subset=["STEC","VTEC"])
+        else:
+            return None
         
 
