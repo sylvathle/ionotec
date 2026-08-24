@@ -376,7 +376,6 @@ class tec_station:
             if len(list_sv)==0: return   
 
             list_cols = self.list_df[const].columns
-            #print (const,list_cols)
             
             chan = {}
             if ("C1P" in list_cols) and ("C2P" in list_cols) and ("L1P" in list_cols) and ("L2P" in list_cols) and ("S1P" in list_cols) and ("S2P" in list_cols):
@@ -449,12 +448,10 @@ class tec_station:
                 
                 self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)
                 
-                #print (self.list_df[const].columns)
                 
                 self.list_df[const]["STEC_p"] = (self.list_df[const][C2] - self.list_df[const][C1])*self.list_df[const]["alpha"]/1e16
                 self.list_df[const]["STEC_l"] = (self.list_df[const]["lambda1"]*self.list_df[const][L1] - \
                                                self.list_df[const]["lambda2"]*self.list_df[const][L2])*self.list_df[const]["alpha"]/1e16
-                #print (self.list_df[const].columns)
                 self.list_df[const].dropna(subset=["STEC_p","STEC_l"],inplace=True)
                 
                 if len(self.list_df[const])!=0:
@@ -473,7 +470,6 @@ class tec_station:
             self.list_df[const] = self.list_df[const].dropna(axis=1, how='all')
             list_cols = self.list_df[const].columns
             
-            #print (const,self.list_df[const].columns)
 
             
             C1, C2 = '', ''
@@ -515,8 +511,6 @@ class tec_station:
                 self.list_df[const]["STEC_l"] = (freq.gps_lambda1*self.list_df[const][L1] - freq.gps_lambda5*self.list_df[const][L2])*freq.gps_alpha/1e16
                 self.list_df[const]["C1"] = chan["C1"]
                 self.list_df[const]["C2"] = chan["C2"]
-                print (chan)
-                print (self.list_df[const].columns)
                 self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)
                 self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
                 #self.list_df['E'].dropna(inplace=True)
@@ -591,7 +585,6 @@ class tec_station:
 
             if len(self.list_df[const])!=0:
                 #self.list_df[const].set_index("time",inplace=True)
-                #print (self.list_df[const])
                 self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
                 self.list_df[const].dropna(subset="STEC_l",inplace=True)         
                 #self.t_min[const] = min(self.list_df[const].index)
@@ -639,9 +632,6 @@ class tec_station:
                 self.channels[const] = []
                 self.channels[const].append(chan)
                 
-                #print (chan)
-                #print (self.list_df[const].columns)
-                #print (self.list_df[const])
 
                 
                 qzss_alpha = freq.gps_f1**2*freq.gps_f5**2/(freq.gps_f1**2-freq.gps_f5**2)/40.318
@@ -652,7 +642,6 @@ class tec_station:
                 self.list_df[const]["C2"] = chan["C2"]
                 self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)
 
-                print (self.list_df[const].columns)
                 self.list_df[const].dropna(subset=["STEC_l","STEC_p"],inplace=True)
                 self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
 
@@ -878,11 +867,9 @@ class tec_station:
                     
                     if len(df_interval_chanel)==0: continue              
                 
-                    rDCB = reco.process_receiver_dcb(df_interval_chanel,elevation_filter = 60)
+                    rDCB = reco.process_receiver_dcb(df_interval_chanel,elevation_filter = 10)
                     self.list_df[const].loc[chanel_process_mask, "rDCB"] = rDCB
 
-                    print (df_interval_chanel)
-        
                     dict_rDCB['station'].append(self.station)
                     dict_rDCB['time_i'].append(min(df_interval_chanel.index))
                     dict_rDCB['time_f'].append(max(df_interval_chanel.index))

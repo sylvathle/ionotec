@@ -583,7 +583,7 @@ class gnss:
                     #if c=='f':
                     #    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=-1)
                     #else:
-                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded-n_files_ready)
+                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,station='',nfirst=n_file_downloaded[c]-n_files_ready)
                     for f in list_downloaded:
                         f_nav.append(Path(f))
                 else: 

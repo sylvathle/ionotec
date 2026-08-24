@@ -135,7 +135,6 @@ def fit_STECP(df_arc,borders_stecp):
     
         # 3. Ajustement dynamique du degré basé sur le nombre de points VALIDES
         degree_fit = min(len(x_fit) - 3, 10)
-        #print (degree_fit,len(x_fit))
     
         # 4. Calcul du fit si on a assez de points valides
         if degree_fit >= 0:
@@ -150,13 +149,10 @@ def fit_STECP(df_arc,borders_stecp):
                 
                 # A very high condition number (e.g., > 1e12) means a poor fit
                 if condition_number > 1e12 or rank < (degree_fit + 1):
-                    #print("Fit is poorly conditioned based on singular values.")
                     continue
             except: 
-                print ('STEC_p fit did not work\n')
                 continue
         else:
-            #print ('Not enough valid data points for fit for degree '+str(degree_fit)+' '+str(len(x))+' '+str(len(x_fit))+'\n')
             continue
     
         # 5. Évaluation sur l'axe 'x' complet (conserve les dimensions d'origine du DataFrame)
@@ -193,7 +189,6 @@ def correct_signal(df_arc):
         if not healthy_segment[iborder]:
             ileft = iborder-1
             iright = iborder+1 if iborder<len(borders_stecp)-1 else iborder
-            #print (borders_stecp[ileft][1],borders_stecp[iright][0])
             df_arc.loc[borders_stecp[ileft][1]:borders_stecp[iright][0], 'STEC_p'] = np.nan
         else:
             df_arc.loc[borders_stecp[iborder-1][1]:borders_stecp[iborder][0], 'STEC_p'] = np.nan
@@ -212,7 +207,6 @@ def correct_signal(df_arc):
     filter_erractic_segments = (df_arc.index<borders_stecl[0][0])
     df_arc[filter_erractic_segments] = np.nan    
     for iborder in range(1,len(borders_stecl)):
-    #    #print (iborder,borders_stecl[iborder-1][1],borders_stecl[iborder][0])
         filter_erractic_segments = (df_arc.index>borders_stecl[iborder-1][1]) & (df_arc.index<borders_stecl[iborder][0])
         df_arc[filter_erractic_segments] = np.nan
     filter_erractic_segments = (df_arc.index>borders_stecl[-1][1])
@@ -242,7 +236,6 @@ def correct_signal(df_arc):
             
             ## In case STEC_l corrected with is going too far away from the true value we the part that was adjusted with STEC_p.
             if max(df_seg['diffSTEC'])>15*sigma: 
-                print ('correction with fit',df_seg['sv'].tolist()[0],df_seg.index[0],df_seg.index[-1],max(df_seg['diffSTEC']),15*sigma)
                 df_arc.loc[filter_segment,'STEC_l'] = df_arc.loc[filter_segment,'STEC_p_fit']
 
             arc_anchored = True
