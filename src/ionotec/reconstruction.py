@@ -167,6 +167,7 @@ def fit_STECP(df_arc,borders_stecp):
 #def correct_signal(df_arc,borders_stecp,borders_stecl):
 def correct_signal(df_arc):
 
+    t_min_to_paste = 30*60 #30 minutes in seconds
     df_arc.dropna(subset=['STEC_l'],inplace=True)
 
     borders_stecl = list_leaps_series(df_arc['STEC_l'],tol_dev=1./60.,N=3) # tol_dev=1TECu/minute
@@ -213,13 +214,20 @@ def correct_signal(df_arc):
 
     iborder = 0
     while iborder<len(borders_stecl):
-        
+
+        #print (iborder, borders_stecl)
         filter_segment = (df_arc.index>=borders_stecl[iborder][0]) & (df_arc.index<=borders_stecl[iborder][1])
         df_seg = df_arc[filter_segment]#/df_arc.loc[borders_stecl[iborder][0]:borders_stecl[iborder][1]]
         brs = None
         N_valid_STEC_p = len(df_seg['STEC_p'].dropna())
+        #print (df_seg['elevation'])
+        sufficient_elevation = df_seg['elevation'].max()>10/180*np.pi
+        #print (borders_stecl[iborder][0],borders_stecl[iborder][1],df_seg['elevation'].max(),10)
+        #print (iborder,borders_stecl[iborder])
 
-        if N_valid_STEC_p>N_min_stec_p:
+        if N_valid_STEC_p>N_min_stec_p and sufficient_elevation:
+            
+            #print ('\t Anchor segment with STEC_p')
             df_seg_br = df_seg.dropna(subset=['STEC_p'])
             df_seg_br['BRs'] = (df_seg_br["STEC_p"]-df_seg_br["STEC_l"])*df_seg_br["sin2_ele"]
             brs=df_seg_br['BRs'].sum(skipna=True)/df_seg_br["sin2_ele"].sum(skipna=True)
@@ -234,51 +242,92 @@ def correct_signal(df_arc):
             df_seg['diffSTEC'] = df_seg['STEC_l']-df_seg['STEC_p_fit']
             
             ## In case STEC_l corrected with is going too far away from the true value we the part that was adjusted with STEC_p.
-            if max(df_seg['diffSTEC'])>15*sigma: 
-                df_arc.loc[filter_segment,'STEC_l'] = df_arc.loc[filter_segment,'STEC_p_fit']
+            
+            if df_seg['diffSTEC'].max()>10*sigma: 
+                df_arc.loc[filter_segment,'STEC_l'] = np.nan #df_arc.loc[filter_segment,'STEC_p_fit']
 
+            #print (borders_stecl[iborder][0],borders_stecl[iborder][1],\
+            #       df_arc.loc[filter_segment,'STEC_l'].corr(df_arc.loc[filter_segment,'STEC_p'], method='spearman'))
+            #sub = df_arc[filter_segment]
+            #sub = sub[['STEC_l','STEC_p']].dropna()
+            #print (pearsonr(sub['STEC_l'],sub['STEC_p']))
+            
             arc_anchored = True
             iborder+=1
+            #for b in borders_stecl: print (b[0],b[1])  
             continue
             
         # If no baseline could be established and the segment under analysis is not the first one, 
         #        we glue it to the previous one
-        elif len(borders_stecl)>1:    
+        elif len(borders_stecl)>1:   
+            #print ('Need to glue')
             if iborder==0:
                 t_dist = (borders_stecl[1][0]-borders_stecl[0][1]).seconds
-                slope = (borders_stecl[0][3]+borders_stecl[1][2])/2.0
-                glue = df_arc["STEC_l"].loc[borders_stecl[1][0]] - df_arc["STEC_l"].loc[borders_stecl[0][1]] - slope*t_dist
-                df_arc.loc[filter_segment,'STEC_l']+=glue
-                borders_stecl[0][1]=borders_stecl[1][1]
-                borders_stecl[0][3]=borders_stecl[1][3]
-                del (borders_stecl[1])
+                if t_dist<t_min_to_paste:
+                    slope = (borders_stecl[0][3]+borders_stecl[1][2])/2.0
+                    glue = df_arc["STEC_l"].loc[borders_stecl[1][0]] - df_arc["STEC_l"].loc[borders_stecl[0][1]] - slope*t_dist
+                    df_arc.loc[filter_segment,'STEC_l']+=glue
+                    borders_stecl[0][1]=borders_stecl[1][1]
+                    borders_stecl[0][3]=borders_stecl[1][3]
+                    del (borders_stecl[1])
+                    #print ('\t glue iborder==0')
+                else:
+                    #print ("\t reject segment")
+                    df_arc.loc[filter_segment,'STEC_l']=np.nan
+                    del (borders_stecl[0])
+                #for b in borders_stecl: print (b[0],b[1])               
                 iborder-=1
+                
             elif (iborder>0) and (iborder<len(borders_stecl)-1): 
                 #We first look for the closest segment 
                 t_dist_left=(borders_stecl[iborder][0]-borders_stecl[iborder-1][1]).seconds
                 t_dist_right=(borders_stecl[iborder+1][0]-borders_stecl[iborder][1]).seconds
-    
-                if t_dist_left<=t_dist_right:
+                #print ('\t look closest segment')
+                ### Case we have a segment that is isolated without anchor, we remove it.
+                if min(t_dist_left,t_dist_right)>t_min_to_paste:
+                    #df_arc.loc[filter_segment,'STEC_l']-=np.nan
+                    #print ("\t Reject segment")
+                    df_arc.loc[filter_segment,'STEC_l']-=np.nan
+                    #print ('DEL border 2', borders_stecl[iborder])
+                    del borders_stecl[iborder]
+                    iborder-=1
+                elif t_dist_left<=t_dist_right:
+                    #print ("\t paste left",'t_dist_left<=t_dist_right',t_dist, t_dist_left,t_dist_right)
                     slope = (borders_stecl[iborder][2]+borders_stecl[iborder-1][3])/2
                     glue = df_arc["STEC_l"].loc[borders_stecl[iborder][0]] - df_arc["STEC_l"].loc[borders_stecl[iborder-1][1]] - slope*t_dist_left
                     df_arc.loc[filter_segment,'STEC_l']-=glue  
+                    #print ('t_dist_left<=t_dist_right',t_dist_left,t_dist_right)
                 else:
+                    #print ("\t paste right",'t_dist_left>t_dist_right',t_dist,t_dist_left,t_dist_right)
                     slope = (borders_stecl[iborder+1][2]+borders_stecl[iborder][3])/2
                     glue = df_arc["STEC_l"].loc[borders_stecl[iborder+1][0]] - df_arc["STEC_l"].loc[borders_stecl[iborder][1]] - slope*t_dist_right
                     df_arc.loc[filter_segment,'STEC_l']+=glue
                     borders_stecl[iborder][1]=borders_stecl[iborder+1][1]
                     borders_stecl[iborder][3]=borders_stecl[iborder+1][3]
+                    #print ('DEL border 3', borders_stecl[iborder+1])
                     del (borders_stecl[iborder+1])
+                    #print ('else paste left')
                     iborder-=1
             else:
+                #print ('ENd vborder')
                 t_dist = (borders_stecl[-1][0]-borders_stecl[-2][1]).seconds
-                slope = (borders_stecl[-1][2]+borders_stecl[-2][3])/2.0
-                glue = df_arc["STEC_l"].loc[borders_stecl[-1][0]] - df_arc["STEC_l"].loc[borders_stecl[-2][1]] - slope*t_dist
-                df_arc.loc[filter_segment,'STEC_l']-=glue
-                borders_stecl[0][1]=borders_stecl[1][1]
-                borders_stecl[0][3]=borders_stecl[1][3]
-                del (borders_stecl[1])
+                if t_dist<t_min_to_paste:
+                    slope = (borders_stecl[-1][2]+borders_stecl[-2][3])/2.0
+                    glue = df_arc["STEC_l"].loc[borders_stecl[-1][0]] - df_arc["STEC_l"].loc[borders_stecl[-2][1]] - slope*t_dist
+                    df_arc.loc[filter_segment,'STEC_l']-=glue
+                    borders_stecl[0][1]=borders_stecl[1][1]
+                    borders_stecl[0][3]=borders_stecl[1][3]
+                    #print ('DEL border4 ', borders_stecl[1])
+                    del (borders_stecl[1])
+                else:
+                    df_arc.loc[filter_segment,'STEC_l']-=np.nan
+                    #print ('deleting border')
+                    #print (borders_stecl[-1])
+                    #print ('DEL border 5', borders_stecl[-1])
+                    del (borders_stecl[-1])
+
                 iborder-=1
+                    
         iborder+=1
 
     if not arc_anchored: df_arc['STEC_l']=np.nan

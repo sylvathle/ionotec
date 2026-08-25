@@ -503,6 +503,7 @@ class tec_station:
             if not ((S1 in list_cols) or (S1 in list_cols)): chan = {}
 
             if chan:
+            
                 self.channels[const] = []
                 self.channels[const].append(chan)
                 
