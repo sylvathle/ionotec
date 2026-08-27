@@ -846,6 +846,8 @@ class tec_station:
                 *section 4.1 of https://hal.archives-ouvertes.fr/hal-00317176/file/angeo-21-2083-2003.pdf
                 *algebra: https://colab.research.google.com/drive/1UCZHR0t-9jyyjAnLuMN3N0Z2NB6tgI_l?usp=sharing
         '''
+
+        reco.estimate_DCB(self.list_)
         
         # Bias of the antenna, calculated by method "compute_reveiver_bias"
         # Value stored in csv "stations.csv"
@@ -956,7 +958,7 @@ class tec_station:
         self.add_baseline()
 
         print ("Calculating receiver DCB, correct Slant TEC, compute VTEC")
-        self.correct_receiver_DCB()
+        #self.correct_receiver_DCB()
 
         df_obs = pd.DataFrame()
 
@@ -965,6 +967,10 @@ class tec_station:
                df_obs,
                self.list_df[const][["sv","lat","lon","elevation","cos_chi","STEC","VTEC"]]
             ])
+
+
+        reco.estimate_DCB(df_obs)
+
 
         
             
