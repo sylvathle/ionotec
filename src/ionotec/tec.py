@@ -198,6 +198,7 @@ class tec_station:
 
             for const, df in list_df_f_obs.items():
                 df.set_index('time',inplace=True)
+                if (len(df)==0): continue
                 if const in self.list_df.keys():
                     self.list_df[const] = pd.concat([self.list_df[const],df])
                 else:
@@ -338,10 +339,10 @@ class tec_station:
             if ("C1C" in list_cols) and ("C2W" in list_cols) and ("L1C" in list_cols) and ("L2W" in list_cols) and ("S1C" in list_cols) and ("S2W" in list_cols):
                 C1,C2,L1,L2,S1,S2 = "C1C","C2W","L1C","L2W","S1C","S2W"
                 chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
-            elif ("C1" in list_cols) and ("P2" in list_cols) and ("L1" in list_cols) and ("L2" in list_cols):
+            elif ("C1" in list_cols) and ("P2" in list_cols) and ("L1" in list_cols) and ("L2" in list_cols) and ('S1' in list_cols) and ('S2' in list_cols):
                 C1,C2,L1,L2,S1,S2 = "C1","P2","L1","L2","S1","S2"
                 chan = {"C1":"C1W","C2":"C2W","L1":"L1","L2":"L2","S1":"S1","S2":"S2"}
-            elif ("P1" in list_cols) and ("P2" in list_cols) and ("L1" in list_cols) and ("L2" in list_cols):
+            elif ("P1" in list_cols) and ("P2" in list_cols) and ("L1" in list_cols) and ("L2" in list_cols) and ('S1' in list_cols) and ('S2' in list_cols):
                 C1,C2,L1,L2,S1,S2 = "P1","P2","L1","L2","S1","S2"
                 chan = {"C1":"C1W","C2":"C2W","L1":"L1","L2":"L2","S1":"S1","S2":"S2"}
 
@@ -405,25 +406,28 @@ class tec_station:
                 chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2,"S1":"S1","S2":"S2"}
             elif ("L1" in list_cols) and ("L2" in list_cols):
                 L1,L2,S1,S2 = "L1","L2","S1","S2"
-                chan = {"C1":"","C2":"","L1":L1,"L2":L2,"S1":"S1","S2":"S2"}
-                if ("P2" in list_cols):
-                    C2="P2"
-                    chan["C2"] = "C2P"
-                    if ("P1" in list_cols): 
-                        C1="P1"
-                        chan["C1"]="C1P"
-                    elif ("C1" in list_cols): 
-                        C1="C1"
-                        chan["C1"]="C1C"
-                elif ("C2" in list_cols):
-                    C2="C2"
-                    chan["C2"] = "C2C"
-                    if ("P1" in list_cols): 
-                        C1="P1"
-                        chan["C1"]="C1P"
-                    elif ("C1" in list_cols): 
-                        C1="C1"
-                        chan["C1"]="C1C"
+                if not (('S1' in self.list_df[const].columns) and ('S2' in self.list_df[const].columns)):
+                    chan = {}
+                else:
+                    chan = {"C1":"","C2":"","L1":L1,"L2":L2,"S1":"S1","S2":"S2"}
+                    if ("P2" in list_cols):
+                        C2="P2"
+                        chan["C2"] = "C2P"
+                        if ("P1" in list_cols): 
+                            C1="P1"
+                            chan["C1"]="C1P"
+                        elif ("C1" in list_cols): 
+                            C1="C1"
+                            chan["C1"]="C1C"
+                    elif ("C2" in list_cols):
+                        C2="C2"
+                        chan["C2"] = "C2C"
+                        if ("P1" in list_cols): 
+                            C1="P1"
+                            chan["C1"]="C1P"
+                        elif ("C1" in list_cols): 
+                            C1="C1"
+                            chan["C1"]="C1C"
                     
 
             if chan:
@@ -605,13 +609,13 @@ class tec_station:
             C1, C2, L1, L2, S1, S2 = '', '', '', '', '', ''
             for c in ['C','X','S','L','Z']:
                 varc1 = 'C1'+c
-                if varc1 in self.list_df[const].columns:
+                if (varc1 in self.list_df[const].columns) and ('S1'+c in self.list_df[const].columns):
                     C1 = varc1
                     S1 = 'S1'+c
                     break
             for c in ['Q','X','I']:
                 varc2 = 'C5'+c
-                if varc2 in self.list_df[const].columns:
+                if (varc2 in self.list_df[const].columns) and ('S5'+c in self.list_df[const].columns):
                     C2 = varc2
                     S2 = 'S5'+c
                     break
@@ -628,8 +632,6 @@ class tec_station:
             if (C1!='') and (C2!='') and (L1!='') and (L2!='') and (S1!='') and (S2!=''): 
                 chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
                     
-            #chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
-
             if chan:
                 self.channels[const] = []
                 self.channels[const].append(chan)
@@ -854,6 +856,7 @@ class tec_station:
         for const in self.list_df.keys():
 
             if len(self.list_df[const])==0: continue
+            print ('Compute DCB', const)
             
             d = self.datemin
             
@@ -900,6 +903,7 @@ class tec_station:
         ## Correct STEC and VTEC with rDCB
         for const in self.list_df.keys():
 
+            print ('corrected STEC', const)
             if len(self.list_df[const])==0: continue 
 
             self.list_df[const]["STEC"] = self.list_df[const]["STEC_l"]-self.list_df[const]["rDCB"]
