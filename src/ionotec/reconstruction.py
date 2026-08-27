@@ -167,6 +167,11 @@ def fit_STECP(df_arc,borders_stecp):
 #def correct_signal(df_arc,borders_stecp,borders_stecl):
 def correct_signal(df_arc):
 
+    if (df_arc['elevation'].max()<np.pi/6):
+        df_arc['STEC_l']=np.nan
+        df_arc.dropna(subset=['STEC_l'],inplace=True)
+        return df_arc
+
     t_min_to_paste = 30*60 #30 minutes in seconds
     df_arc.dropna(subset=['STEC_l'],inplace=True)
 

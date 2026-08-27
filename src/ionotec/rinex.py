@@ -104,7 +104,7 @@ class rinex:
     def __init__(self,rinex_path_):
         
         self.rinex_path = rinex_path_
-        self.file = open(self.rinex_path, 'r')
+        self.file = open(self.rinex_path, 'r', encoding="latin-1")
         self.dict_obs = {}
         self.header = {}
         self.list_df = {}
@@ -239,11 +239,14 @@ class rinex:
                 for constellation in ['G','R']:
                     #print (constellation)
                     #print (self.vars_list)
-                    obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
-                    df_temp = obs.to_dataframe()
-                    df_temp.reset_index(inplace=True)
-                    #print (df_temp)
-                    self.list_df[constellation] = df_temp                    
+                    try:
+                        obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
+                        df_temp = obs.to_dataframe()
+                        df_temp.reset_index(inplace=True)
+                        #print (df_temp)
+                        self.list_df[constellation] = df_temp                    
+                    except:
+                        continue
                # for const in self.list_df.keys():
                 #    print (self.list_df[const])
                 #sys.exit()
@@ -252,10 +255,13 @@ class rinex:
                 for constellation in ['G','R']:
                 #for constellation in ['G']:
                     #print (self.vars_list)
-                    obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
-                    df_temp = obs.to_dataframe()
-                    df_temp.reset_index(inplace=True)
-                    self.list_df[constellation] = df_temp
+                    try:
+                        obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
+                        df_temp = obs.to_dataframe()
+                        df_temp.reset_index(inplace=True)
+                        self.list_df[constellation] = df_temp
+                    except:
+                        continue
                 return self.list_df
             if self.header['type']=='N':
                 if self.header['constellation']=='S':
