@@ -832,8 +832,8 @@ class tec_station:
             # Restore original index and drop helper columns
             self.list_df[const] = self.list_df[const].set_index('time').drop(columns=['time_day', 'time_df2'])
 
-            self.list_df[const]["STEC_l"] += self.list_df[const]["dcb"]
-            self.list_df[const]["VTEC"]=self.list_df[const]["STEC_l"]*self.list_df[const]['cos_chi']
+            self.list_df[const]["STEC"] = self.list_df[const]["STEC_l"] + self.list_df[const]["dcb"]
+            self.list_df[const]["VTEC"]=self.list_df[const]["STEC"]*self.list_df[const]['cos_chi']
 
         for const in const_to_del:
             del self.list_df[const]
@@ -908,7 +908,7 @@ class tec_station:
             print ('corrected STEC', const)
             if len(self.list_df[const])==0: continue 
 
-            self.list_df[const]["STEC"] = self.list_df[const]["STEC_l"]-self.list_df[const]["rDCB"]
+            self.list_df[const]["STEC"] = self.list_df[const]["STEC"]-self.list_df[const]["rDCB"]
             self.list_df[const]["VTEC"] = self.list_df[const]["STEC"] * self.list_df[const]["cos_chi"] 
                 #np.cos(np.arcsin(R_E*np.cos(self.list_df[const]["elevation"])/(R_E+self.h)))
 
@@ -927,6 +927,163 @@ class tec_station:
 
         for const in const_to_del:
             del self.list_df[const]
+
+
+
+    def estimate_dcb(self) -> pd.Series:
+        """
+        Estimate differential code biases (DCB) per constellation / dual-frequency
+        pair by minimizing the epoch-wise scatter of cross-system VTEC estimates.
+
+        Author of the code: mostly Claude
+        But I swear it's my idea, please believe me
+        More importantly: it works.
+    
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Indexed by datetime (the epoch). Required columns:
+                STEC       : slant TEC, corrected for satellite DCB but NOT for
+                             receiver DCB (this is `s^j_{i,s}` in the derivation)
+                cosChi     : cos(chi), the STEC -> VTEC obliquity factor
+                elevation  : satellite elevation in DEGREES. Used to weight each
+                             observation by w = sin^2(elevation), down-weighting
+                             low-elevation (longer path, more multipath/mapping-
+                             function error) measurements. If your `elevation`
+                             column is in radians, convert to degrees first or
+                             edit the `np.sin(np.radians(...))` call below.
+                C1, C2     : code/pseudorange identifiers for the two
+                             frequencies used to form this signal pair
+                sv         : satellite PRN string, e.g. 'G12', 'R07', 'C23'
+    
+        Returns
+        -------
+        pd.Series
+            DCB estimate B^j for each system, indexed by a
+            (constellation, C1, C2) MultiIndex.
+    
+        Notes
+        -----
+        Solves, for each system j = (constellation, C1, C2):
+    
+            v^j_{i,s} = (STEC^j_{i,s} - B^j) * cosChi^j_{i,s}
+    
+        for the B^j minimizing the epoch-wise weighted variance of v across all
+        systems/satellites observed at each epoch i, with each observation
+        weighted by w_{i,s} = sin^2(elevation_{i,s}). The per-epoch weighted mean
+        v_hat_i is profiled out analytically (weighted Frisch-Waugh-Lovell
+        partialling-out of an epoch fixed effect), leaving a small n x n
+        (n = number of systems) linear system:
+    
+            H @ B = -Psi
+    
+        with
+    
+            H[q, n]  = sum_i [ -2 * xi_i^q * xi_i^n
+                                + delta(q, n) * (2 / W_i) * sum_k w_{i,k} (c^n_{i,k})^2 ]
+            Psi[n]   = sum_i [ -(2 / W_i) * sum_k w_{i,k} s^n_{i,k} * (c^n_{i,k})^2
+                                + 2 * xi_i^n * zeta_i ]
+    
+            xi_i^j   = (1 / W_i) * sum_{s in system j} w_{i,s} * cosChi_{i,s}
+            zeta_i   = (1 / W_i) * sum_j sum_s w_{i,s} * STEC^j_{i,s} * cosChi^j_{i,s}
+            W_i      = sum_j sum_s w_{i,s}   (all systems/satellites at epoch i)
+    
+        This is the unweighted derivation with every count/sum replaced by a
+        weighted sum -- weighted least squares with a group fixed effect
+        partials out via the weighted group mean exactly as the unweighted case
+        partials out via the plain mean, so no fresh derivation is needed.
+    
+        Everything is computed via epoch x system pivot tables and a couple of
+        matrix products -- there is no per-epoch Python loop, so this scales to
+        long sessions with many epochs; cost is O(sum_i N_i) for the aggregation
+        plus O(n^2 * n_epochs) for the two matrix products, both cheap since n
+        (number of constellation/frequency-pair systems) is typically small.
+    
+        A single system (n = 1) is fine: within an epoch, satellites at
+        different elevations have different cosChi, so shifting STEC by a
+        constant B still changes the within-epoch spread unless every satellite
+        shares exactly the same cosChi. More generally, an epoch only
+        constrains the *relative* bias between systems it jointly observes --
+        if some system is never observed in the same epoch as any other system
+        (when n > 1), H is rank-deficient for it and `lstsq` returns a
+        minimum-norm solution; a warning is raised in that case, and that
+        system's estimate should not be trusted without an external anchor.
+        """
+    
+        print ('In estimate_dcb')
+        print (self.df_obs)
+        required = {"STEC", "cos_chi", "elevation", "C1", "C2", "sv"}
+        missing = required - set(self.df_obs.columns)
+        if missing:
+            raise ValueError(f"missing required columns: {missing}")
+    
+        work = self.df_obs.copy()
+        work["constellation"] = work["sv"].str[0]
+        work["j"] = list(zip(work["constellation"], work["C1"], work["C2"]))
+    
+        # elevation weight: sin^2(elevation), elevation assumed in degrees
+        work["w"] = np.sin(np.radians(work["elevation"])) ** 2
+    
+        # per-row quantities feeding the epoch x j aggregates (all pre-multiplied
+        # by the weight, so aggregation below is a plain groupby-sum)
+        work["wc"] = work["w"] * work["cos_chi"]
+        work["wc2"] = work["w"] * work["cos_chi"] ** 2
+        work["wsc"] = work["w"] * work["STEC"] * work["cos_chi"]
+        work["wsc2"] = work["w"] * work["STEC"] * work["cos_chi"] ** 2
+    
+        j_labels = sorted(work["j"].unique())
+        n = len(j_labels)
+    
+        # epoch x j aggregates (weighted sums; "cnt" kept only as a diagnostic)
+        agg = work.groupby([work.index, "j"]).agg(
+            sumWC=("wc", "sum"),
+            sumWC2=("wc2", "sum"),
+            sumWSC=("wsc", "sum"),
+            sumWSC2=("wsc2", "sum"),
+            sumW=("w", "sum"),
+        )
+    
+        def pivot(col):
+            return agg[col].unstack("j").reindex(columns=j_labels).fillna(0.0)
+    
+        sumWC = pivot("sumWC")      # epoch x j
+        sumWC2 = pivot("sumWC2")
+        sumWSC = pivot("sumWSC")
+        sumWSC2 = pivot("sumWSC2")
+        sumW = pivot("sumW")
+    
+        W = sumW.sum(axis=1)                          # total weight per epoch
+        valid = W > 0
+        sumWC, sumWC2 = sumWC[valid], sumWC2[valid]
+        sumWSC, sumWSC2, W = sumWSC[valid], sumWSC2[valid], W[valid]
+    
+        Xi = sumWC.div(W, axis=0).to_numpy()           # epoch x j : xi_i^j
+        zeta = sumWSC.sum(axis=1).div(W).to_numpy()    # epoch     : zeta_i
+    
+        # H = -2 * Xi^T Xi + diag( sum_i (2/W_i) sumWC2_{i,j} )
+        cross = Xi.T @ Xi
+        diag_term = 2.0 * sumWC2.div(W, axis=0).sum(axis=0).to_numpy()
+        H = -2.0 * cross + np.diag(diag_term)
+    
+        # Psi^n = -2 * sum_i (1/W_i) sumWSC2_{i,n} + 2 * sum_i xi_i^n * zeta_i
+        psi_term1 = -2.0 * sumWSC2.div(W, axis=0).sum(axis=0).to_numpy()
+        psi_term2 = 2.0 * (Xi.T @ zeta)
+        Psi = psi_term1 + psi_term2
+    
+        B, _residuals, rank, _sv = np.linalg.lstsq(H, -Psi, rcond=None)
+        if rank < n:
+            warnings.warn(
+                f"H is rank-deficient (rank {rank} of {n}): some systems are "
+                "never jointly observed with another system in the same epoch, "
+                "so their DCB is not uniquely determined by this data."
+            )
+    
+        index = pd.MultiIndex.from_tuples(
+            j_labels, names=["constellation", "C1", "C2"]
+        )
+        print (pd.Series(B, index=index, name="DCB"))
+        return pd.Series(B, index=index, name="DCB")
+
 
         
     def to_feather(self):
@@ -964,31 +1121,28 @@ class tec_station:
         print ("Calculating receiver DCB, correct Slant TEC, compute VTEC")
         #self.correct_receiver_DCB()
 
-        df_obs = pd.DataFrame()
+        self.df_obs = pd.DataFrame()
 
         for const in self.list_df.keys():
-            df_obs = pd.concat([
-               df_obs,
-               self.list_df[const][["sv","lat","lon","elevation","cos_chi","STEC","VTEC"]]
+            self.df_obs = pd.concat([
+               self.df_obs,
+               self.list_df[const][["sv","C1","C2","lat","lon","elevation","cos_chi","STEC","VTEC"]]
             ])
 
 
-        reco.estimate_DCB(df_obs)
+        self.estimate_dcb()
 
 
-        
-            
-
-        if len(df_obs)>0:
+        if len(self.df_obs)>0:
             if store:
-                for year in df_obs.index.year.unique():
+                for year in self.df_obs.index.year.unique():
                     # Filter the dataframe for the current year
-                    df_year = df_obs[df_obs.index.year == year]
+                    df_year = self.df_obs[self.df_obs.index.year == year]
                     folder = st.root_dir + "TEC/" + str(year) + "/"
                     Path(folder).mkdir(parents=True, exist_ok=True)
                     feather_path = folder + self.station
                     df_year.to_feather(feather_path+".feather")
-            return df_obs.dropna(subset=["STEC","VTEC"])
+            return self.df_obs.dropna(subset=["STEC","VTEC"])
         else:
             return None
         
