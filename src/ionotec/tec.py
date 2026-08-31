@@ -1085,17 +1085,18 @@ class tec_station:
         self.df_obs["STEC"] = self.df_obs["STEC"]-self.df_obs["rDCB"]
         self.df_obs["VTEC"] = self.df_obs["STEC"] * self.df_obs["cos_chi"] 
 
+        self.df_br = pd.DataFrame(j_labels, columns=["constellation", "C1", "C2"]).assign(DCB=B)
+        self.df_br['station'] = self.station
+        self.df_br['time_i'] =  min(self.df_obs.index)
+        self.df_br['time_f'] =  max(self.df_obs.index)
+        self.df_br.set_index('station',inplace=True)
+        self.df_br = pd.concat([df_br_stored,self.df_br])
+
         f_br = st.root_dir + "TEC/DCB_receiver.csv"
         if os.path.exists(f_br):
             df_br_stored = pd.read_csv(f_br).set_index("station")
             df_br_stored = df_br_stored[df_br_stored.index!=self.station]
             #self.df_br = pd.Series(B, index=index, name="DCB").reset_index()
-            self.df_br = pd.DataFrame(j_labels, columns=["constellation", "C1", "C2"]).assign(DCB=B)
-            self.df_br['station'] = self.station
-            self.df_br['time_i'] =  min(self.df_obs.index)
-            self.df_br['time_f'] =  max(self.df_obs.index)
-            self.df_br.set_index('station',inplace=True)
-            self.df_br = pd.concat([df_br_stored,self.df_br])
         self.df_br.to_csv(f_br)
 
         
