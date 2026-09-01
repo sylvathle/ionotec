@@ -44,6 +44,7 @@ import pymap3d as pm
 #import math	
 #import time
 #import re
+from scipy.interpolate import interp1d
 
 
 #import psutil
@@ -219,109 +220,21 @@ class tec_station:
 
 
         const_to_del = []
-        for k in self.list_df.keys():
-            if k!="S": continue
-            const_to_del.append(k)
+        #for k in self.list_df.keys():
+            #if k!="S": continue
+        #    const_to_del.append(k)
         for const in const_to_del:
             del self.list_df[const]
             
         list_all_sv = []
         for const in self.list_df.keys():
             list_all_sv += self.list_df[const]['sv'].unique().tolist()            
-            
+
         self.gnss = gnss.gnss(datemin=self.datemin,datemax=self.datemax,list_satellites=list_all_sv)
         self.gnss.load_all_sats()        
 
         self.sat_dcb = DCB.load_dcb(datemin=self.datemin,datemax=self.datemax)
 
-
-    '''
-    def prepare_files(self):
-        directory_path = Path(self.source_data_folder)
-        
-        # List all files recursively
-        files = sorted([file for file in directory_path.rglob("*") if file.is_file()])
-        list_day_f_obs = {}
-        for file in files:
-            ext = file.name.split(".")[-1]
-            end_ext = ''.join([char for char in ext if not char.isdigit()])
-
-            if ext=="crx":
-                year = int(file.name[-26:-22])
-                doy = int(file.name[-22:-19])
-            elif ext=="rnx":
-                year = int(file.name[-22:-18])
-                doy = int(file.name[-18:-15])
-            elif end_ext in ["d","o","n","g","h"]:
-                year = int(file.name[-3:-1])+2000
-                doy = int(file.name[-8:-5])
-        
-            if end_ext in self.obs_extension:
-                date = datetime.datetime(year, 1, 1, 0, 0, 0, 0) + datetime.timedelta(days=doy - 1)
-
-                if self.datemin is not None:
-                    if (date < self.datemin): continue
-                if self.datemax is not None:
-                    if (date > self.datemax): continue              
-                station = file.name[:4].lower()
-                if station not in self.list_obs_stations:
-                    self.list_obs_stations.append(station)
-                
-
-                if not station in list_day_f_obs.keys(): 
-                    list_day_f_obs[station] = {date:[file]}
-                    #self.dict_f_obs[station] = [file]
-                else: 
-                    if not date in list_day_f_obs[station].keys():
-                        list_day_f_obs[station][date] = [file]
-                    else:
-                        list_day_f_obs[station][date].append(file)# = {"day":date,"files":[]}
-                        
-                    
-            if end_ext in self.nav_extension:
-                date = datetime.datetime(year, 1, 1, 0, 0, 0, 0) + datetime.timedelta(days=doy - 1)
-                if self.datemin is not None:
-                    if (date < self.datemin): continue
-                if self.datemax is not None:
-                    if (date > self.datemax): continue                
-                self.list_f_nav.append(file)
-
-            if end_ext in self.dcb_extensions:
-                if (end_ext=='BSX') or (end_ext=='BIA'):
-                    year = int(file.name[-27:-23])
-                    doy = int(file.name[-23:-20])
-                    date = datetime.datetime(year, 1, 1, 0, 0, 0, 0) + datetime.timedelta(days=doy - 1)
-                    if self.datemin is not None:
-                        if (date < self.datemin): continue
-                    if self.datemax is not None:
-                        if (date > self.datemax): continue             
-                elif (end_ext=='DCB'):
-                    year = int(file.name[-8:-6])+2000
-                    month = int(file.name[-6:-4])
-                    if self.datemin is not None:
-                        if year<self.datemin.year: continue
-                        if year==self.datemin.year and month<self.datemin.month: continue
-                    if self.datemax is not None:
-                        if year>self.datemax.year: continue
-                        if year==self.datemax.year and month>self.datemax.month: continue                
-                self.list_f_dcb.append(str(file))
-
-
-        for station in list_day_f_obs.keys():
-            self.dict_f_obs[station] = []
-            for date in list_day_f_obs[station].keys():              
-                for file in list_day_f_obs[station][date]:
-                    if '.crx' in file.name: 
-                        self.dict_f_obs[station].append(str(file))
-                        break
-                    if file.name[-1]=='d': 
-                        self.dict_f_obs[station].append(str(file))
-                        break
-                    if file.name[-1]=='o': 
-                        self.dict_f_obs[station].append(str(file))
-                        break
-
-    '''
 
 
     def rinex_to_stec(self):
@@ -656,19 +569,20 @@ class tec_station:
                 del self.list_df[const]
 
 
-
         if "S" in self.list_df.keys():
 
             const = "S"
-            list_columns=self.list_df[const]
-            C1, C2, L1, L2 = 'C1C', 'C5I', 'L1C', 'L5I'
+            list_columns=self.list_df[const].columns
+            C1, C2, L1, L2, S1, S2 = 'C1C', 'C5I', 'L1C', 'L5I', 'S1C', 'S5I'
             chan = {}
             if (C1 in list_columns) \
                     and (C2 in list_columns)\
                     and (L1 in list_columns)\
-                    and (L2 in list_columns):
+                    and (L2 in list_columns)\
+                    and (S1 in list_columns)\
+                    and (S2 in list_columns):
 
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2}
+                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
 
             if chan:
 
@@ -676,6 +590,7 @@ class tec_station:
                 self.channels[const].append(chan)
                 #self.list_df[const].set_index("time",inplace=True)
                 #self.t_min[const] = min(self.list_df[const].index)
+                self.list_df[const].rename(columns={S1:'S1', S2:'S2'},inplace=True)
                 #self.t_max[const] = max(self.list_df[const].index)        
 
                 sbas_alpha = freq.gps_f1**2*freq.gps_f5**2/(freq.gps_f1**2-freq.gps_f5**2)/40.318
@@ -685,9 +600,11 @@ class tec_station:
                 self.list_df[const]["C1"] = chan["C1"]
                 self.list_df[const]["C2"] = chan["C2"]
                 
-                self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
+                #self.list_df[const] = self.list_df[const][['sv',"C1","C2","STEC_l","STEC_p"]]
+                self.list_df[const] = self.list_df[const][['sv',"C1","C2",'S1','S2',"STEC_l","STEC_p"]]
 
             else: del self.list_df[const]
+
 
 
         # List satellites seen by the station and prepare dict of list_borders
@@ -753,6 +670,7 @@ class tec_station:
         for const, df_data in self.list_df.items():
 
             if len(df_data)==0: continue
+            #if const!='S': continue
 
             df_data = df_data.dropna(subset=["elevation"])
 
@@ -767,10 +685,6 @@ class tec_station:
 
             for sat in list_sv:
             
-                #if sat!='G04': continue
-                #print (sat)
-
-
                 df_sat = df_data[df_data["sv"]==sat]
                 #df_sat_filter = pd.DataFrame()
                 
@@ -778,7 +692,6 @@ class tec_station:
 
                 for channel in self.channels[const]:
 
-                    #if channel['C2']!='C6I': continue
                     chan_filter = (df_sat["C1"]==channel["C1"]) & (df_sat["C2"]==channel["C2"])
                     df_sat_chanel = df_sat[chan_filter]
                         
@@ -806,9 +719,10 @@ class tec_station:
                         df_arc = reco.correct_signal(df_arc)
 
                         df_sats_corrected = pd.concat([df_sats_corrected,df_arc])    
+
         
                     if len(df_sats_corrected)==0: continue
-            
+
             self.list_df[const] = df_sats_corrected
 
             if len(self.list_df[const])==0: 
@@ -823,7 +737,7 @@ class tec_station:
                 self.sat_dcb[['time', 'sv', 'C1', 'C2', 'dcb']],
                 left_on=['time_day', 'sv', 'C1', 'C2'],
                 right_on=['time','sv', 'C1', 'C2'],
-                how='inner',
+                how='left',
                 suffixes=('', '_df2')
             )
 
@@ -832,8 +746,8 @@ class tec_station:
             # Restore original index and drop helper columns
             self.list_df[const] = self.list_df[const].set_index('time').drop(columns=['time_day', 'time_df2'])
 
-            self.list_df[const]["STEC"] = self.list_df[const]["STEC_l"] + self.list_df[const]["dcb"]
-            self.list_df[const]["VTEC"]=self.list_df[const]["STEC"]*self.list_df[const]['cos_chi']
+            self.list_df[const]["STEC"] = self.list_df[const]["STEC_l"] + self.list_df[const]["dcb"].fillna(0)
+            #self.list_df[const]["VTEC"]=self.list_df[const]["STEC"]*self.list_df[const]['cos_chi']
 
         for const in const_to_del:
             del self.list_df[const]
@@ -858,7 +772,6 @@ class tec_station:
         for const in self.list_df.keys():
 
             if len(self.list_df[const])==0: continue
-            print ('Compute DCB', const)
             
             d = self.datemin
             
@@ -905,7 +818,6 @@ class tec_station:
         ## Correct STEC and VTEC with rDCB
         for const in self.list_df.keys():
 
-            print ('corrected STEC', const)
             if len(self.list_df[const])==0: continue 
 
             self.list_df[const]["STEC"] = self.list_df[const]["STEC"]-self.list_df[const]["rDCB"]
@@ -930,7 +842,7 @@ class tec_station:
 
 
 
-    def estimate_dcb(self) -> pd.Series:
+    def estimate_dcb(self, ) -> pd.Series:
         """
         Estimate differential code biases (DCB) per constellation / dual-frequency
         pair by minimizing the epoch-wise scatter of cross-system VTEC estimates.
@@ -1009,98 +921,198 @@ class tec_station:
         minimum-norm solution; a warning is raised in that case, and that
         system's estimate should not be trusted without an external anchor.
         """
-        required = {"STEC", "cos_chi", "elevation", "C1", "C2", "sv"}
-        missing = required - set(self.df_obs.columns)
+        #required = {"STEC", "cos_chi", "elevation", "C1", "C2", "sv", "dcb"}
+        #missing = required - set(self.df_obs.columns)
 
        # required = {"STEC", "cosChi", "elevation", "C1", "C2", "sv"}
         #missing = required - set(df.columns)
-        if missing:
-            raise ValueError(f"missing required columns: {missing}")
+        #if missing:
+        #    raise ValueError(f"missing required columns: {missing}")
+
+        min_t = min(self.df_obs.index)
+        max_t = max(self.df_obs.index)
+
+        d = min_t
+
+        list_df_br = []
+
+        while d<=max_t:
+
+            mask_time = (self.df_obs.index>=d) & (self.df_obs.index<d+self.rDCB_interval)
      
-        work = self.df_obs.copy()
-        work["constellation"] = work["sv"].str[0]
-        work["j"] = list(zip(work["constellation"], work["C1"], work["C2"]))
+            work = self.df_obs[mask_time].copy()
+            mask = work["dcb"].isna()
+            work["constellation"] = work["sv"].str[0]
+            work.loc[mask, "constellation"] = work.loc[mask, "sv"].to_numpy()
+            work["j"] = list(zip(work["constellation"], work["C1"], work["C2"]))
      
-        # elevation weight: sin^2(elevation), elevation assumed in degrees
-        work["w"] = np.sin(np.radians(work["elevation"])) ** 2
+            # elevation weight: sin^2(elevation), elevation assumed in degrees
+            work["w"] = np.sin(np.radians(work["elevation"])) ** 2
      
-        # per-row quantities feeding the epoch x j aggregates (all pre-multiplied
-        # by the weight, so aggregation below is a plain groupby-sum)
-        work["wc"] = work["w"] * work["cos_chi"]
-        work["wc2"] = work["w"] * work["cos_chi"] ** 2
-        work["wsc"] = work["w"] * work["STEC"] * work["cos_chi"]
-        work["wsc2"] = work["w"] * work["STEC"] * work["cos_chi"] ** 2
+            # per-row quantities feeding the epoch x j aggregates (all pre-multiplied
+            # by the weight, so aggregation below is a plain groupby-sum)
+            work["wc"] = work["w"] * work["cos_chi"]
+            work["wc2"] = work["w"] * work["cos_chi"] ** 2
+            work["wsc"] = work["w"] * work["STEC"] * work["cos_chi"]
+            work["wsc2"] = work["w"] * work["STEC"] * work["cos_chi"] ** 2
      
-        j_labels = sorted(work["j"].unique())
-        n = len(j_labels)
+            j_labels = sorted(work["j"].unique())
+            n = len(j_labels)
      
-        # epoch x j aggregates (weighted sums; "cnt" kept only as a diagnostic)
-        agg = work.groupby([work.index, "j"]).agg(
-            sumWC=("wc", "sum"),
-            sumWC2=("wc2", "sum"),
-            sumWSC=("wsc", "sum"),
-            sumWSC2=("wsc2", "sum"),
-            sumW=("w", "sum"),
-        )
-     
-        def pivot(col):
-            return agg[col].unstack("j").reindex(columns=j_labels).fillna(0.0)
-     
-        sumWC = pivot("sumWC")      # epoch x j
-        sumWC2 = pivot("sumWC2")
-        sumWSC = pivot("sumWSC")
-        sumWSC2 = pivot("sumWSC2")
-        sumW = pivot("sumW")
-     
-        W = sumW.sum(axis=1)                          # total weight per epoch
-        valid = W > 0
-        sumWC, sumWC2 = sumWC[valid], sumWC2[valid]
-        sumWSC, sumWSC2, W = sumWSC[valid], sumWSC2[valid], W[valid]
-     
-        Xi = sumWC.div(W, axis=0).to_numpy()           # epoch x j : xi_i^j
-        zeta = sumWSC.sum(axis=1).div(W).to_numpy()    # epoch     : zeta_i
-     
-        # H = -2 * Xi^T Xi + diag( sum_i (2/W_i) sumWC2_{i,j} )
-        cross = Xi.T @ Xi
-        diag_term = 2.0 * sumWC2.div(W, axis=0).sum(axis=0).to_numpy()
-        H = -2.0 * cross + np.diag(diag_term)
-     
-        # Psi^n = -2 * sum_i (1/W_i) sumWSC2_{i,n} + 2 * sum_i xi_i^n * zeta_i
-        psi_term1 = -2.0 * sumWSC2.div(W, axis=0).sum(axis=0).to_numpy()
-        psi_term2 = 2.0 * (Xi.T @ zeta)
-        Psi = psi_term1 + psi_term2
-     
-        B, _residuals, rank, _sv = np.linalg.lstsq(H, -Psi, rcond=None)
-        if rank < n:
-            warnings.warn(
-                f"H is rank-deficient (rank {rank} of {n}): some systems are "
-                "never jointly observed with another system in the same epoch, "
-                "so their DCB is not uniquely determined by this data."
+            # epoch x j aggregates (weighted sums; "cnt" kept only as a diagnostic)
+            agg = work.groupby([work.index, "j"]).agg(
+                sumWC=("wc", "sum"),
+                sumWC2=("wc2", "sum"),
+                sumWSC=("wsc", "sum"),
+                sumWSC2=("wsc2", "sum"),
+                sumW=("w", "sum"),
             )
      
-        index = pd.MultiIndex.from_tuples(
-            j_labels, names=["constellation", "C1", "C2"]
-        )
-        self.df_obs['rDCB'] = work.set_index(['constellation','C1','C2']).index.map(pd.Series(B, index=index, name="rDCB"))
-        self.df_obs["STEC"] = self.df_obs["STEC"]-self.df_obs["rDCB"]
-        self.df_obs["VTEC"] = self.df_obs["STEC"] * self.df_obs["cos_chi"] 
+            def pivot(col):
+                return agg[col].unstack("j").reindex(columns=j_labels).fillna(0.0)
+     
+            sumWC = pivot("sumWC")      # epoch x j
+            sumWC2 = pivot("sumWC2")
+            sumWSC = pivot("sumWSC")
+            sumWSC2 = pivot("sumWSC2")
+            sumW = pivot("sumW")
+     
+            W = sumW.sum(axis=1)                          # total weight per epoch
+            valid = W > 0
+            sumWC, sumWC2 = sumWC[valid], sumWC2[valid]
+            sumWSC, sumWSC2, W = sumWSC[valid], sumWSC2[valid], W[valid]
+     
+            Xi = sumWC.div(W, axis=0).to_numpy()           # epoch x j : xi_i^j
+            zeta = sumWSC.sum(axis=1).div(W).to_numpy()    # epoch     : zeta_i
+     
+            # H = -2 * Xi^T Xi + diag( sum_i (2/W_i) sumWC2_{i,j} )
+            cross = Xi.T @ Xi
+            diag_term = 2.0 * sumWC2.div(W, axis=0).sum(axis=0).to_numpy()
+            H = -2.0 * cross + np.diag(diag_term)
+     
+            # Psi^n = -2 * sum_i (1/W_i) sumWSC2_{i,n} + 2 * sum_i xi_i^n * zeta_i
+            psi_term1 = -2.0 * sumWSC2.div(W, axis=0).sum(axis=0).to_numpy()
+            psi_term2 = 2.0 * (Xi.T @ zeta)
+            Psi = psi_term1 + psi_term2
+     
+            B, _residuals, rank, _sv = np.linalg.lstsq(H, -Psi, rcond=None)
+            if rank < n:
+                warnings.warn(
+                    f"H is rank-deficient (rank {rank} of {n}): some systems are "
+                    "never jointly observed with another system in the same epoch, "
+                    "so their DCB is not uniquely determined by this data."
+                )
+     
+            #index = pd.MultiIndex.from_tuples(
+            #    j_labels, names=["constellation", "C1", "C2"]
+            #)
+            #self.df_obs['rDCB'] = work.set_index(['constellation','C1','C2']).index.map(pd.Series(B, index=index, name="rDCB"))
+            index = pd.MultiIndex.from_tuples(
+                j_labels, names=["constellation", "C1", "C2"]
+            )
 
-        self.df_br = pd.DataFrame(j_labels, columns=["constellation", "C1", "C2"]).assign(DCB=B)
-        self.df_br['station'] = self.station
-        self.df_br['time_i'] =  min(self.df_obs.index)
-        self.df_br['time_f'] =  max(self.df_obs.index)
+            rDCB = pd.Series(B, index=index)
+
+            #self.df_obs.loc[mask_time,"rDCB"] = work["j"].map(rDCB)
+
+            df_br_interval = pd.DataFrame(j_labels, columns=["constellation", "C1", "C2"]).assign(DCB=B)
+            df_br_interval['station'] = self.station
+            df_br_interval['time_i'] =  d
+            df_br_interval['time_f'] =  max(work.index)
+            #min(max(self.df),max(self.df_obs.index))
+            #df_br_interval.set_index('station',inplace=True)
+            list_df_br.append(df_br_interval)
+            d += self.rDCB_interval
+
+        self.df_br = pd.concat(list_df_br)
+
+        self.df_br['t'] = self.df_br['time_i'] + (self.df_br['time_f'] - self.df_br['time_i'])/2
+
+        obs = self.df_obs.copy()
+
+        obs["constellation"] = obs["sv"].str[0]
+
+        # If you want the same rule as before:
+        # when dcb is NaN, use the complete SV as constellation
+        mask = obs["dcb"].isna()
+        obs.loc[mask, "constellation"] = obs.loc[mask, "sv"].to_numpy()
+
+
+        # ------------------------------------------------------------
+        # 2. Prepare output
+        # ------------------------------------------------------------
+
+        obs["DCB"] = np.nan
+
+
+        # ------------------------------------------------------------
+        # 3. Interpolate independently for each constellation/C1/C2
+        # ------------------------------------------------------------
+
+        for (constellation, C1, C2), br in self.df_br.groupby(
+            ["constellation", "C1", "C2"]
+        ):
+
+            # Select observations belonging to this triplet
+            mask_obs = (
+                (obs["constellation"] == constellation)
+                & (obs["C1"] == C1)
+                & (obs["C2"] == C2)
+            )
+
+            if not mask_obs.any():
+                continue
+
+            # Sort interpolation points by time
+            br = br.sort_values("t")
+
+            # Remove duplicate interpolation times
+            br = br.drop_duplicates("t")
+
+            if len(br) < 1: continue
+
+            # Convert datetime to seconds for numerical interpolation
+            t0 = br["t"].min()
+
+            x = (br["t"] - t0).dt.total_seconds().to_numpy()
+            y = br["DCB"].to_numpy()
+
+            # Observation times
+            x_obs = (
+                obs.loc[mask_obs].index - t0
+            ).total_seconds().to_numpy()
+
+            # Polynomial interpolation, maximum order 3
+            order = min(3, len(br) - 1)
+
+            interpolator = interp1d(
+                x,
+                y,
+                kind=order,
+                bounds_error=False,
+                fill_value=(y[0], y[-1]),
+            )
+
+            obs.loc[mask_obs, "DCB"] = interpolator(x_obs)
+
+
+        # Put result back
+        self.df_obs["rDCB"] = obs["DCB"]
+        #print (self.df_obs[self.df_obs['sv']=='G01'])
+
         self.df_br.set_index('station',inplace=True)
-        self.df_br = pd.concat([df_br_stored,self.df_br])
+        self.df_br.drop(columns=['t'],inplace=True)
 
         f_br = st.root_dir + "TEC/DCB_receiver.csv"
         if os.path.exists(f_br):
             df_br_stored = pd.read_csv(f_br).set_index("station")
             df_br_stored = df_br_stored[df_br_stored.index!=self.station]
-            #self.df_br = pd.Series(B, index=index, name="DCB").reset_index()
+            self.df_br = pd.concat([df_br_stored,self.df_br])
         self.df_br.to_csv(f_br)
 
-        
-        #return pd.Series(B, index=index, name="DCB")
+
+        self.df_obs["STEC"] = self.df_obs["STEC"]-self.df_obs["rDCB"]
+        self.df_obs["VTEC"] = self.df_obs["STEC"] * self.df_obs["cos_chi"] 
 
 
         
@@ -1124,32 +1136,32 @@ class tec_station:
         self.h = h
         self.rDCB_interval = rdcb_interval
 
-        print ("Load files")
+        #print ("Load files")
         self.load_files()
 
-        print ("RINEX to STEC")
+        #print ("RINEX to STEC")
         self.rinex_to_stec()
         
-        print ("Add GNSS Navigation Information (IPP & Elevation)")
+        #print ("Add GNSS Navigation Information (IPP & Elevation)")
         self.add_satellite_pos()
         
-        print ("Correct Slant TEC discontinuities and baseline")
+        #print ("Correct Slant TEC discontinuities and baseline")
         self.add_baseline()
 
-        print ("Calculating receiver DCB, correct Slant TEC, compute VTEC")
-        #self.correct_receiver_DCB()
+        #print ("Calculating receiver DCB, correct Slant TEC, compute VTEC")
 
         self.df_obs = pd.DataFrame()
 
         for const in self.list_df.keys():
             self.df_obs = pd.concat([
                self.df_obs,
-               self.list_df[const][["sv","C1","C2","lat","lon","elevation","cos_chi","STEC","VTEC"]]
+               self.list_df[const][["sv","C1","C2","lat","lon","elevation","cos_chi","STEC","dcb"]]
                #self.list_df[const][["sv","lat","lon","elevation","cos_chi","STEC","VTEC"]]
             ])
 
 
         self.estimate_dcb()
+        #print (self.list_df['S'])
 
 
         if len(self.df_obs)>0:

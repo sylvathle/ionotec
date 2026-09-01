@@ -27,7 +27,7 @@ def extract_gz_files(source_file,dest_file):
                 
 
 
-def get_rinex_from_cddis(year,doy,suff,DEST_DIR_BASE,station='',nfirst=-1):
+def get_rinex_from_cddis(year,doy,suff,DEST_DIR_BASE,list_stations=None,nfirst=-1):
     
     BASE_URL = "https://cddis.nasa.gov/archive/gnss/data/daily/"+str(year)+"/"+str(doy)+"/"+suff+"/"
     #DEST_DIR = "/home/sylvain/Documents/jupyter_project/TEC/receiver_dcb/rinex/IGS/"+str(year)+"/"+str(doy)+"/"+suff+"/"
@@ -72,8 +72,11 @@ def get_rinex_from_cddis(year,doy,suff,DEST_DIR_BASE,station='',nfirst=-1):
     
         #print (station,href)
         #print (href.strip())
-        if station in href.lower(): links.append(href.strip())
-        else: continue
+        if list_stations!=None:
+            for station in list_stations:
+                if station in href.lower(): links.append(href.strip())
+        else: links.append(href.strip())
+
    
 
         splthref = href.split('.')

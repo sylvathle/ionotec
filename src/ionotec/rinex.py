@@ -276,7 +276,6 @@ class rinex:
                     #self.df_nav.index = pd.to_datetime(self.df_nav.index)
                     return self.df_nav
                
-
         elif int(self.header["version"])==3: 
             if self.header['type']=='O':
                 self.read_obs()
