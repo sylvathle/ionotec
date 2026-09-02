@@ -623,7 +623,7 @@ class gnss:
                 suff = str(year-2000)+'p'
                 directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
                 directory_GNSS_path_const.mkdir(exist_ok=True)
-                list_stations = ['nnor','mgue','harb','hrag','nklg','gamg']
+                list_stations = ['nnor','mgue','harb','hrag','nklg','gamg','mas1','mgue']
                 if os.path.exists(directory_GNSS_path_const):
                     list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=list_stations,nfirst=len(list_stations))
                     for f in list_downloaded: 

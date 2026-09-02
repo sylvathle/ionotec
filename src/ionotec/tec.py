@@ -928,6 +928,9 @@ class tec_station:
         #missing = required - set(df.columns)
         #if missing:
         #    raise ValueError(f"missing required columns: {missing}")
+        if len(self.df_obs)==0:
+            self.df_obs['rDCB'] = float('NaN')
+            return self.df_obs.dropna(subset=['rDCB'])
 
         min_t = min(self.df_obs.index)
         max_t = max(self.df_obs.index)
