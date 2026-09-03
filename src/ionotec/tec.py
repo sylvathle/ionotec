@@ -170,6 +170,8 @@ class tec_station:
         self.channels = {}
         self.list_df = {}
 
+        self.h  = 350000
+
         self.station = ""
         self.datemin = None
         self.datemax = None
