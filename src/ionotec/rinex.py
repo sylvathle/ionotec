@@ -38,8 +38,8 @@ def process_head_data_line(line):
 
     ### Get Satellites list
     istr = 0
-    str_sats=spline[9]
     if len(spline)<10: return d,nsat,[]
+    str_sats=spline[9]
     str_sats = line[41:].replace(" ","0")
     list_sats = []
     while istr<len(str_sats):
