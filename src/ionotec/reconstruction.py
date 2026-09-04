@@ -13,8 +13,9 @@ def fit_lin(t,sig):
         d-=2*t[i]*sig[i] # A coef
         e-=2*sig[i] # B coef
 
-    if (a==0) and (c==0):
-        return float('NaN'),float('NaN'),float('NaN'),float('NaN')
+    if( (a==0) and (c==0)) or (4*a*b-c**2==0):
+        return float('NaN'),float('NaN')
+
         
     # Forward A and B parameters of linear fit (solve the minimum of mse)
     A=-(2*b*d-c*e)/(4*a*b-c**2)

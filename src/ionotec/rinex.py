@@ -243,6 +243,7 @@ class rinex:
                     try:
                         obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
                         df_temp = obs.to_dataframe()
+                        del obs
                         df_temp.reset_index(inplace=True)
                         #print (df_temp)
                         self.list_df[constellation] = df_temp                    
@@ -259,6 +260,7 @@ class rinex:
                     try:
                         obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
                         df_temp = obs.to_dataframe()
+                        del obs
                         df_temp.reset_index(inplace=True)
                         self.list_df[constellation] = df_temp
                     except:
@@ -841,6 +843,8 @@ class rinex:
 
         self.df_nav = pd.DataFrame(dict_nav_data)
         self.df_nav.set_index(["time","sv"],inplace=True)
+
+        self.file.close()
  
 
     def read_nav3_xyz(self):
@@ -925,6 +929,8 @@ class rinex:
 
         self.df_nav = pd.DataFrame(dict_nav_data)
         self.df_nav.set_index(["time","sv"],inplace=True)
+
+        self.file.close()
     
             #if i>20: break
 
@@ -1098,6 +1104,8 @@ class rinex:
         self.df_nav = pd.DataFrame(dict_nav_data)
         self.df_nav.set_index(["time","sv"],inplace=True)
 
+        self.file.close()
+
 
     def read_nav4_xyz(self):
         
@@ -1180,5 +1188,7 @@ class rinex:
 
         self.df_nav = pd.DataFrame(dict_nav_data)
         self.df_nav.set_index(["time","sv"],inplace=True)
+
+        self.file.close()
 
 
