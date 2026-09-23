@@ -380,6 +380,7 @@ def load_dcb(datemin=None,datemax=None):
     
     for f in list_used_dcb:
         dict_dcb = {"time":[],"sv":[],"C1":[],"C2":[],"dcb":[],"std":[]}
+        if len(f)<3: continue
         if f[-3:]=="BIA" or f[-3:]=="BSX":
             #print (f)
             fsplit = f.split("_")

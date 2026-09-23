@@ -286,6 +286,13 @@ class rinex:
             if self.header['type']=='N':
                 #nav = gr.load(self.rinex_path)
                 #self.df_nav = nav.to_dataframe()
+
+                print (self.header['constellation'])
+
+                if self.header['constellation']=='M':
+                    nav = self.read_nav3_mixed()
+                sys.exit()
+
                 if self.header['constellation'] in ['G','J','C','E']:
                     nav = self.read_nav3_ephemerids()
                 else:
@@ -295,6 +302,10 @@ class rinex:
                 #return self.df_nav
 
         elif (int(self.header["version"])==4):
+            if (self.header['type']=='N'):
+                if self.header['constellation'] == 'M':
+                    return self.read_nav4()
+                    #return self.df_nav_ephemerids, self.df_nav_ecef
             if (self.header['type']=='N'):
                 if self.header['constellation'] in ['G','J','C','E']:
                     nav = self.read_nav4_ephemerids()
@@ -356,7 +367,7 @@ class rinex:
         while self.line:
             self.line = self.file.readline() 
             if (len(self.line)>0) and (self.line[0]=='>'): 
-                print ("LEAVE FOR FILE for restarting hatanaka '>' at beginning of file")
+                print ("LEAVE FOR FILE for restarting hatanaka '>' at beginning of file", self.rinex_path)
                 #self.file.close()
                 break
             
@@ -933,6 +944,287 @@ class rinex:
         self.file.close()
     
             #if i>20: break
+
+
+    def read_ephemerids(self):
+
+        self.line = self.file.readline()
+        sv=self.line[:3]
+        sv = sv.replace(" ","0")
+        y = int(self.line[4:8])
+        m = int(self.line[9:11])
+        d = int(self.line[12:14])
+        H = int(self.line[15:17])
+        M = int(self.line[18:20])
+        S = int(self.line[21:23])
+        d = datetime.datetime(y,m,d,H,M,S,0)
+        self.dict_ephemerids["sv"].append(sv)
+        self.dict_ephemerids["time"].append(d)
+        #il=23
+        il=23
+        if len(self.line)>=il+19: clock_bias = getVal(self.line[il:il+19])
+        else: clock_bias = float('NaN')
+        self.dict_ephemerids["SVclockBias"].append(clock_bias)
+        il=il+19
+        if len(self.line)>=il+19: SVclockDrift = getVal(self.line[il:il+19])
+        else: SVclockDrift = float('NaN')
+        self.dict_ephemerids["SVclockDrift"].append(SVclockDrift)
+        il=il+19
+        if len(self.line)>=il+19: SVclockDrift2 = getVal(self.line[il:il+19])
+        else: SVclockDrift2 = float('NaN')
+        self.dict_ephemerids["SVclockDrift2"].append(SVclockDrift2)
+
+        self.line = self.file.readline()
+        il=4
+        if len(self.line)>=il+19: IODE = getVal(self.line[il:il+19])
+        else: IODE = float('NaN')
+        self.dict_ephemerids["IODE"].append(IODE)
+        il=il+19
+        if len(self.line)>=il+19: Crs = getVal(self.line[il:il+19])
+        else: Crs = float('NaN')
+        self.dict_ephemerids["Crs"].append(Crs)
+        il=il+19                
+        if len(self.line)>=il+19: DeltaN = getVal(self.line[il:il+19])
+        else: DeltaN = float('NaN')
+        self.dict_ephemerids["DeltaN"].append(DeltaN)                
+        il=il+19
+        if len(self.line)>=il+19: M0 = getVal(self.line[il:il+19])
+        else: M0 = float('NaN')
+        self.dict_ephemerids["M0"].append(M0)    
+
+        self.line = self.file.readline()
+        il=4
+        if len(self.line)>=il+19: Cuc = getVal(self.line[il:il+19])
+        else: Cuc = float('NaN')
+        self.dict_ephemerids["Cuc"].append(Cuc)
+        il=il+19
+        if len(self.line)>=il+19: Eccentricity = getVal(self.line[il:il+19])
+        else: Eccentricity = float('NaN')
+        self.dict_ephemerids["Eccentricity"].append(Eccentricity)
+        il=il+19
+        if len(self.line)>=il+19: Cus = getVal(self.line[il:il+19])
+        else: Cus = float('NaN')
+        self.dict_ephemerids["Cus"].append(Cus)                
+        il=il+19
+        if len(self.line)>=il+19: sqrtA = getVal(self.line[il:il+19])
+        else: sqrtA = float('NaN')
+        self.dict_ephemerids["sqrtA"].append(sqrtA) 
+
+        self.line = self.file.readline()
+        il=4
+        if len(self.line)>=il+19: Toe = getVal(self.line[il:il+19])
+        else: Toe = float('NaN')
+        self.dict_ephemerids["Toe"].append(Toe)
+        il=il+19
+        if len(self.line)>=il+19: Cic = getVal(self.line[il:il+19])
+        else: Cic = float('NaN')
+        self.dict_ephemerids["Cic"].append(Cic)
+        il=il+19
+        if len(self.line)>=il+19: Omega0 = getVal(self.line[il:il+19])
+        else: Omega0 = float('NaN')
+        self.dict_ephemerids["Omega0"].append(Omega0)                
+        il=il+19
+        if len(self.line)>=il+19: Cis = getVal(self.line[il:il+19])
+        else: Cis = float('NaN')
+        self.dict_ephemerids["Cis"].append(Cis) 
+
+        self.line = self.file.readline()
+        il=4
+        if len(self.line)>=il+19: Io = getVal(self.line[il:il+19])
+        else: Io = float('NaN')
+        self.dict_ephemerids["Io"].append(Io)
+        il=il+19
+        if len(self.line)>=il+19: Crc = getVal(self.line[il:il+19])
+        else: Crc = float('NaN')
+        self.dict_ephemerids["Crc"].append(Crc)
+        il=il+19
+        if len(self.line)>=il+19: omega = getVal(self.line[il:il+19])
+        else: omega = float('NaN')
+        self.dict_ephemerids["omega"].append(omega)                
+        il=il+19
+        if len(self.line)>=il+19: OmegaDot = getVal(self.line[il:il+19])
+        else: OmegaDot = float('NaN')
+        self.dict_ephemerids["OmegaDot"].append(OmegaDot) 
+
+
+        self.line = self.file.readline()
+        il=4
+        if len(self.line)>=il+19: IDOT = getVal(self.line[il:il+19])
+        else: IDOT = float('NaN')
+        self.dict_ephemerids["IDOT"].append(IDOT)
+        il=il+19
+        if len(self.line)>=il+19: L2 = getVal(self.line[il:il+19])
+        else: L2 = float('NaN')
+        self.dict_ephemerids["L2"].append(L2)
+        il=il+19
+        if len(self.line)>=il+19: Week = getVal(self.line[il:il+19])
+        else: Week = float('NaN')
+        self.dict_ephemerids["Week"].append(Week)                
+        il=il+19
+        if len(self.line)>=il+19: L2Pflag = getVal(self.line[il:il+19])
+        else: L2Pflag = float('NaN')
+        self.dict_ephemerids["L2Pflag"].append(L2Pflag) 
+        
+        self.line = self.file.readline()
+        il=4
+        if len(self.line)>=il+19: svAcc = getVal(self.line[il:il+19])
+        else: svAcc = float('NaN')
+        self.dict_ephemerids["svAcc"].append(svAcc)
+        il=il+19
+        if len(self.line)>=il+19: health = getVal(self.line[il:il+19])
+        else: health = float('NaN')
+        self.dict_ephemerids["health"].append(health)
+        il=il+19
+        if len(self.line)>=il+19: TGD = getVal(self.line[il:il+19])
+        else: TGD = float('NaN')
+        self.dict_ephemerids["TGD"].append(TGD)                
+        il=il+19
+        if len(self.line)>=il+19: IODC = getVal(self.line[il:il+19])
+        else: IODC = float('NaN')
+        self.dict_ephemerids["IODC"].append(IODC) 
+
+        self.line = self.file.readline().replace("\n","")
+        il=4
+        transTime = float(self.line[il:il+19].replace("D","E"))
+        if len(self.line)>=il+19: transTime = getVal(self.line[il:il+19])
+        else: transTime = float('NaN')
+        self.dict_ephemerids["transTime"].append(transTime)
+        il=il+19
+        if len(self.line)>=il+19: BNK = getVal(self.line[il:il+19])
+        else: BNK = float('NaN')
+        self.dict_ephemerids["BNK"].append(BNK)
+
+    def read_ecef(self):
+
+        self.line = self.file.readline()
+        sv=self.line[:3]
+        sv = sv.replace(" ","0")
+        y = int(self.line[4:8])
+        m = int(self.line[9:11])
+        d = int(self.line[12:14])
+        H = int(self.line[15:17])
+        M = int(self.line[18:20])
+        S = int(self.line[21:23])
+        d = datetime.datetime(y,m,d,H,M,S,0)
+        self.dict_ecef["sv"].append(sv)
+        self.dict_ecef["time"].append(d)
+        il=23
+        clock_bias = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["SVclockBias"].append(clock_bias)
+        il=il+19
+        rel_freq_bias = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["SVrelFreqBias"].append(rel_freq_bias)
+        il=il+19
+        transmission_time = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["MessageFrameTime"].append(transmission_time)
+
+        self.line = self.file.readline()
+        il=4
+        X = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["X"].append(X*1e3)
+        il=il+19
+        dX = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["dX"].append(dX*1e3)
+        il=il+19
+        dX2 = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["dX2"].append(dX2*1e3)                
+        il=il+19
+        health = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["health"].append(health)    
+
+        self.line = self.file.readline()
+        il=4
+        Y = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["Y"].append(Y*1e3)
+        il=il+19
+        dY = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["dY"].append(dY*1e3)
+        il=il+19
+        dY2 = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["dY2"].append(dY2*1e3)                
+        il=il+19
+        acc_code = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["URA"].append(acc_code) 
+
+        self.line = self.file.readline()
+        il=4
+        Z = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["Z"].append(Z*1e3)
+        il=il+19
+        dZ = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["dZ"].append(dZ*1e3)
+        il=il+19
+        dZ2 = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["dZ2"].append(dZ2*1e3)                
+        il=il+19
+        iodn = float(self.line[il:il+19].replace("D","E"))
+        self.dict_ecef["IODN"].append(iodn) 
+
+    def read_nav4(self):
+
+        #i = 0
+        self.dict_ephemerids = {
+            "sv":[], "time":[], "SVclockBias":[], "SVclockDrift": [], "SVclockDrift2":[],
+            "IODE":[], "Crs":[], "DeltaN":[], "M0":[],
+            "Cuc":[], "Eccentricity":[], "Cus":[], "sqrtA":[],
+            "Toe":[], "Cic":[], "Omega0":[], "Cis":[],
+            "Io":[], "Crc":[], "omega":[], "OmegaDot":[],
+            "IDOT":[], "L2":[], "Week":[], "L2Pflag":[],
+            "svAcc":[], "health":[], "TGD":[], "IODC":[],
+            "transTime":[], "BNK":[]
+        }
+
+        self.dict_ecef = {
+            "sv":[], "time":[], "SVclockBias":[], "SVrelFreqBias": [], "MessageFrameTime":[],
+            "X":[], "dX":[], "dX2":[], "health":[],
+            "Y":[], "dY":[], "dY2":[], "URA":[],
+            "Z":[], "dZ":[], "dZ2":[], "IODN":[]           
+        }
+
+        while self.line:
+           
+            #i += 1    
+            if self.line[0:5]!="> EPH": 
+                self.line = self.file.readline()
+                continue
+
+            if self.line[10:14] in ['LNAV','FNAV','CNAV','D1  ','D2  ']: 
+                self.read_ephemerids()
+            elif self.line[10:14] in ['FDMA','SBAS']: 
+                self.read_ecef()
+
+            self.line = self.file.readline()
+
+        self.file.close()
+
+        df_nav_ephemerids = pd.DataFrame(self.dict_ephemerids)
+        df_nav_ecef = pd.DataFrame(self.dict_ecef)
+
+        list_df_nav = {}
+
+        for sv in df_nav_ephemerids['sv'].unique().tolist():
+            const = sv[0]
+            df_sv = df_nav_ephemerids[df_nav_ephemerids['sv']==sv]
+            if (const=='G') or (const=='J'):
+                df_sv.rename(columns={'GPSWeek':'Week'},inplace=True)
+            if const=='C': df_sv.rename(columns={"BDTWeek":"Week"},inplace=True)
+            if const=='E': df_sv.rename(columns={"GALWeek":"Week"},inplace=True)
+            #df_sv.index = pd.to_datetime(df_sv.index)
+
+            list_df_nav[sv] = df_sv
+        #    print (df_sv)
+
+        for sv in df_nav_ecef['sv'].unique().tolist():
+            df_sv = df_nav_ecef[df_nav_ecef['sv']==sv]
+            #df_sv.index = pd.to_datetime(df_sv['time'])
+            list_df_nav[sv] = df_sv
+
+        return list_df_nav
+
+        #self.df_nav_ephemerids.set_index(["time","sv"],inplace=True)
+        #self.df_nav_ecef.set_index(["time","sv"],inplace=True)
+
+        
 
     def read_nav4_ephemerids(self):
 

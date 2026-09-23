@@ -299,6 +299,24 @@ def filter_corrupted_nav_rows(df, **kwargs):
     return clean_df, flags_df
     
 
+
+def get_file_by_prefix(folder_path, full_string):
+    # 1. Extract the first 4 characters
+    prefix = full_string[:4]
+    directory = Path(folder_path)
+    print (prefix)
+    print (directory)
+    
+    # 2. Find matching files
+    print ('looking for matching files')
+    for file in directory.glob(f"{prefix}*"):
+        print (file)
+
+    matching_files = (file for file in directory.glob(f"{prefix}*") if file.is_file())
+    #print (matching_files)
+    
+    # 3. Return the first Path object found, or False if the generator is empty
+    return next(matching_files, False)
     
     
 GLONASS_POSITION_COLUMNS = ['sv', 'X', 'Y', 'Z', 'dX', 'dY', 'dZ', 'dX2', 'dY2', 'dZ2']
@@ -548,7 +566,7 @@ class gnss:
                 # If the file doesn't exist then this day needs to be processed
                 if not os.path.exists(feather_sat_file): 
                     self.list_sat_to_reprocess.append(sv)
-                    print ('No position file for satellite',sv)
+                    #print ('No position file for satellite',sv)
                 else:
                     df_day = pd.read_feather(feather_sat_file)
                     if len(df_day)!=n_expected_data: 
@@ -556,11 +574,11 @@ class gnss:
                         print ('Interval for day',doy,'not complete for satellite',sv)
             d += datetime.timedelta(days=1)
 
-        if not len(self.list_sat_to_reprocess) and not reprocess: 
-            #print ("No need to reprocess GNSS position, all needed satellite ready")
-            return
-        else:
-            print ("Looking for files from IGS, and reprocessing")
+        #if not len(self.list_sat_to_reprocess) and not reprocess: 
+        #    #print ("No need to reprocess GNSS position, all needed satellite ready")
+        #    return
+        #else:
+        #    print ("Looking for files from IGS, and reprocessing")
             
         n_file_downloaded = {'n':12,'g':12,'l':14,'q':12,'f':12,'i':12,'h':12}
     
@@ -582,109 +600,166 @@ class gnss:
             doy = (d.date() - datetime.date(year,1,1)).days + 1
             n_files_ready = 0
 
-            for c in list_const_suff:
-                suff = str(year-2000)+c                    
-                   
-                directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
-                if not os.path.exists(directory_GNSS_path_const):
-                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=None,nfirst=n_file_downloaded[c]-n_files_ready)
-                    for f in list_downloaded:
-                        f_nav.append(Path(f))
-                else: 
-                    
-                    listnav_year_doy_suff = []
-                    for file in directory_GNSS_path_const.iterdir(): 
-                        if file.is_file(): listnav_year_doy_suff.append(file)
-                    f_nav += listnav_year_doy_suff
-                    n_files_ready = len(listnav_year_doy_suff)
-                    if len(listnav_year_doy_suff)<n_file_downloaded[c]: 
-                        list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=None,nfirst=n_file_downloaded[c]-n_files_ready)
-                        for f in list_downloaded:
-                            if Path(f) not in f_nav:
-                                f_nav.append(Path(f))
+            #for c in list_const_suff:
+            #    suff = str(year-2000)+c                    
+            #       
+            #    directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
+            #    if not os.path.exists(directory_GNSS_path_const):
+            #        list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=None,nfirst=n_file_downloaded[c]-n_files_ready)
+            #        for f in list_downloaded:
+            #            f_nav.append(Path(f))
+            #    else: 
+            #        
+            #        listnav_year_doy_suff = []
+            #        for file in directory_GNSS_path_const.iterdir(): 
+            #            if file.is_file(): listnav_year_doy_suff.append(file)
+            #        f_nav += listnav_year_doy_suff
+            #        n_files_ready = len(listnav_year_doy_suff)
+            #        if len(listnav_year_doy_suff)<n_file_downloaded[c]: 
+            #            list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=None,nfirst=n_file_downloaded[c]-n_files_ready)
+            #            for f in list_downloaded:
+            #                if Path(f) not in f_nav:
+            #                    f_nav.append(Path(f))
+#
+            #if "C01" in self.list_sat_to_reprocess:
+            #    suff = str(year-2000)+'f'
+            #    directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
+            #    if os.path.exists(directory_GNSS_path_const):
+            #        list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=['guam'],nfirst=1)
+            #        for f in list_downloaded:
+            #            if Path(f) not in f_nav: f_nav.append(Path(f))
+#
+ #           if "C61" in self.list_sat_to_reprocess:
+ #               suff = str(year-2000)+'f'
+ #               directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
+ #               if os.path.exists(directory_GNSS_path_const):
+ #                   list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=['cibg'],nfirst=1)
+ #                   for f in list_downloaded:
+ #                       if Path(f) not in f_nav: f_nav.append(Path(f))
 
-            if "C01" in self.list_sat_to_reprocess:
-                suff = str(year-2000)+'f'
-                directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
-                if os.path.exists(directory_GNSS_path_const):
-                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=['guam'],nfirst=1)
-                    for f in list_downloaded:
-                        if Path(f) not in f_nav: f_nav.append(Path(f))
+            #if any(s.startswith('S') for s in self.list_sat_to_reprocess):
+            #    suff = str(year-2000)+'p'
+            #    directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
+            #    directory_GNSS_path_const.mkdir(exist_ok=True)
+            #    list_stations = ['nnor','mgue','harb','hrag','nklg','gamg','mas1','mgue','redu','brdc']
+            #    if os.path.exists(directory_GNSS_path_const):
+            #        list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=list_stations,nfirst=len(list_stations))
+            #        for f in list_downloaded: 
+            #            if Path(f) not in f_nav: f_nav.append(Path(f))
+            d += datetime.timedelta(days=1)
+            continue
+            suff = str(year-2000)+'p'
+            print ('supposed to download here')
+            directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/')
+            directory_GNSS_path_const.mkdir(parents=True,exist_ok=True)
+            list_stations = ['brd4','brdc']
+            #if os.path.exists(directory_GNSS_path_const):
 
-            if "C61" in self.list_sat_to_reprocess:
-                suff = str(year-2000)+'f'
-                directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
-                if os.path.exists(directory_GNSS_path_const):
-                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=['cibg'],nfirst=1)
-                    for f in list_downloaded:
-                        if Path(f) not in f_nav: f_nav.append(Path(f))
+            for station in list_stations:
+                rinex_folder = self.gnss_dir+str(year)+'/'+str(doy)
+                station_file = get_file_by_prefix(rinex_folder, station)
+                print ('station_file',station_file)
+                if station_file:
+                    f_nav.append(station_file)
+                    continue
+                else:
+                    print ('download', station)
+                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=[station],nfirst=1)
+                    print ('downloaded!')
+                    if len(list_downloaded)==1:
+                        f_nav.append(Path(list_downloaded[0]))
+                        break
 
-            if any(s.startswith('S') for s in self.list_sat_to_reprocess):
-                suff = str(year-2000)+'p'
-                directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/'+suff+'/')
-                directory_GNSS_path_const.mkdir(exist_ok=True)
-                list_stations = ['nnor','mgue','harb','hrag','nklg','gamg','mas1','mgue','redu']
-                if os.path.exists(directory_GNSS_path_const):
-                    list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=list_stations,nfirst=len(list_stations))
-                    for f in list_downloaded: 
-                        if Path(f) not in f_nav: f_nav.append(Path(f))
-                
+            print (f_nav)
                 
             d += datetime.timedelta(days=1)
                 
         self.list_f_rinex_nav = f_nav
       
-        self.compute_position()
+        print ('compute position')
+        print (self.list_f_rinex_nav)
+        #self.compute_position()
+        #sys.exit()
 
     
     # Function that compute the position of the satellites from the navigation file 
     #   with the resolution informed when instanciating the gnss object
-    def compute_position(self):
+    def compute_position(self,list_f_rinex=[]):
 
         directory_path = Path(self.gnss_dir + "/")
 
-        for const in self.list_constellation:
-            self.df_nav_gnss[const] = pd.DataFrame()
+        ##for const in self.list_constellation:
+        #    self.df_nav_gnss[const] = pd.DataFrame()
 
+        print (list_f_rinex)
+        self.list_f_rinex_nav = list_f_rinex
+
+        #print (self.list_f_rinex_nav)
 
         for f_rinex_nav in self.list_f_rinex_nav:
 
-            try: nav = rx.rinex(str(f_rinex_nav))
-            except: continue
+            print (f_rinex_nav)
+            nav = rx.rinex(str(f_rinex_nav))
+           # try: nav = rx.rinex(str(f_rinex_nav))
+           # except: continue
             head = nav.read_header()
-            svtype = head['constellation']
-           
-            try: df_nav = nav.read_data()
-            except:
-                print ("WARNING: Could not read",str(f_rinex_nav))
-                continue
+            #svtype = head['constellation']
+
+            list_df_nav = nav.read_data()
+            for sv in list_df_nav.keys():
+                if sv not in self.df_nav_gnss.keys(): self.df_nav_gnss[sv] = list_df_nav[sv]
+                else: self.df_nav_gnss[sv] = pd.concat([self.df_nav_gnss[sv],list_df_nav[sv]])
+
+
+            #print (list_df_nav)
+            #try: df_nav = nav.read_data()
+            #except:
+            #    print ("WARNING: Could not read",str(f_rinex_nav))
+            #    continue
+
+            #print (df_nav_ephemerids.columns)
+            #print (df_nav_ecef.columns)
             
-            if len(df_nav)==0: continue
+            #if len(df_nav_ephemerids)!=0:
 
-            df_nav.index.set_names(["time","sv"],inplace=True)
-            df_nav.reset_index(level=["sv"],inplace=True)
+            #    df_nav_ephemerids.index.set_names(["time","sv"],inplace=True)
+            #    df_nav_ephemerids.reset_index(level=["sv"],inplace=True)
             
-            for c in df_nav.columns:
-                if 'spare' in c:
-                    df_nav.drop(columns=[c],inplace=True)
-            df_nav.dropna(inplace=True)
-            if (svtype=='G') or (svtype=='J'): df_nav.rename(columns={"GPSWeek":"Week"},inplace=True)
-            if svtype=='C': df_nav.rename(columns={"BDTWeek":"Week"},inplace=True)
-            if svtype=='E': df_nav.rename(columns={"GALWeek":"Week"},inplace=True)
-            if svtype=='M': 
-                svtype='S'
-                df_nav = df_nav[df_nav['sv'].str.startswith('S')]
+            #    for c in df_nav_ephemerids.columns:
+            #        if 'spare' in c:
+            #            df_nav_ephemerids.drop(columns=[c],inplace=True)
+            #    df_nav_ephemerids.dropna(inplace=True)
+            #    if (svtype=='G') or (svtype=='J'): df_nav.rename(columns={"GPSWeek":"Week"},inplace=True)
+            #    if svtype=='C': df_nav.rename(columns={"BDTWeek":"Week"},inplace=True)
+            #    if svtype=='E': df_nav.rename(columns={"GALWeek":"Week"},inplace=True)
+            #if svtype=='M': 
+            #    svtype='S'
+            #    df_nav = df_nav[df_nav['sv'].str.startswith('S')]
 
-            df_nav.index = pd.to_datetime(df_nav.index)
+            #df_nav.index = pd.to_datetime(df_nav.index)
 
-            if len(df_nav)==0: 
-                continue
+            #if len(df_nav)==0: 
+            #    continue
 
             #date = df_nav.index[int(len(df_nav)/2)].date()
             
-            df_nav.sort_index(ascending=True,inplace=True)
+            #df_nav.sort_index(ascending=True,inplace=True)
 
-            self.df_nav_gnss[svtype] = pd.concat([self.df_nav_gnss[svtype],df_nav])
+            #while svtype in ['G','J','C','E','R','S']:
+            #    df_nav_type = df_nav[df_nav['sv'].startswith(svtype)]
+            #    print (svtype)
+            #    print (df_nav_type)
+            #    if (svtype=='G') or (svtype=='J'): df_nav_type.rename(columns={"GPSWeek":"Week"},inplace=True)
+            #    if svtype=='C': df_nav_type.rename(columns={"BDTWeek":"Week"},inplace=True)
+            #    if svtype=='E': df_nav_type.rename(columns={"GALWeek":"Week"},inplace=True)
+            #    self.df_nav_gnss[svtype] = pd.concat([self.df_nav_gnss[svtype],df_nav_type])
+
+        #for k in self.df_nav_gnss.keys():
+        #    print (k)
+        #    print (self.df_nav_gnss[k])
+
+
+        #sys.exit()
 
         min_date = self.datemin.replace(hour=0,minute=0,second=0, microsecond=0)
         midnight = self.datemax.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -702,66 +777,42 @@ class gnss:
             time_list.append(t)
             t = t+datetime.timedelta(seconds=self.resolution)
 
+      
+        #for sv in self.list_sat_to_reprocess:
+        for sv in self.df_nav_gnss.keys():
+            if sv not in self.df_nav_gnss.keys(): continue
+
+            df_sat = self.df_nav_gnss[sv]
+
+            #df_sv = self.df_nav_gnss[sv]
+            df_sat.set_index('time',inplace=True)
+            df_sat.index = pd.to_datetime(df_sat.index)
 
 
-        for const in self.df_nav_gnss.keys():
-            if (len(self.df_nav_gnss[const])<=2): continue
-            list_sv = self.df_nav_gnss[const]["sv"].unique().tolist()
-            
-            if "TGD" in self.df_nav_gnss[const].columns:
-                self.df_nav_gnss[const], flags = filter_corrupted_nav_rows(self.df_nav_gnss[const])
+            const = sv[0]
+
+            if "TGD" in self.df_nav_gnss[sv].columns:
+                df_sat, flags = filter_corrupted_nav_rows(df_sat)
                 
             if const in ["R","S"]:
-                self.df_nav_gnss[const] = drop_duplicate_ephemeris_glonass(self.df_nav_gnss[const])
-            
-            
-            
-            #self.df_nav_gnss[const] = self.df_nav_gnss[const].drop_duplicates()
-            
-            self.df_nav_gnss[const] = self.df_nav_gnss[const].groupby(["time","sv"]).mean()
-            self.df_nav_gnss[const].reset_index(level=["sv"],inplace=True)
-            
-            
-            #if const=='R':
-            #    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-                    #self.df_nav_gnss[const][ (self.df_nav_gnss[const]['sv']=="R16") & (self.df_nav_gnss[const].index>datetime.datetime(2024,5,9,12,0,0,0)) & (self.df_nav_gnss[const].index<datetime.datetime(2024,5,9,18,0,0,0))].to_csv('R16.csv')
-            
-            #df_nav, flags = filter_corrupted_nav_rows(df_nav)
+                df_sat = drop_duplicate_ephemeris_glonass(df_sat)
+
+            df_sat = df_sat[~df_sat.index.duplicated(keep="first")]
+
+            if len(df_sat)<3: continue
 
 
-            #for sv in list_sv:
-            for sv in self.list_sat_to_reprocess:
-                #if sv in self.list_excluded_satellites: continue
-                #print (sv)
-                #if sv[0]!='S': continue
-
-                if len(sv)>3: continue
-                df_sat = self.df_nav_gnss[const][self.df_nav_gnss[const]["sv"]==sv]
-                if len(df_sat)<3: continue
-
-
-                if sv[0] in ['G','E','C','J']:
-                    i_time_list = 0
-                    date = time_list[i_time_list]
-                    # Intermediate dictionary intended to contain data of the satellite under process 
-                    dict_sat_pos = {"time":[],"X":[],"Y":[],"Z":[]}
-                    df_sat = df_sat[df_sat['sqrtA']!=0]
-                    for t_nav, row in df_sat.iterrows():
-                        # Calculate position for each time in time_list that are before the next available position information
-                        while date < t_nav and i_time_list<len(time_list):
-                            #print (date,t_nav)
-                            #if sv=="G14": print ("\t",date)
-                            sat_pos = ephemeris_to_XYZ(row,date)
-                            dict_sat_pos["time"].append(date)
-                            dict_sat_pos["X"].append(sat_pos[0])
-                            dict_sat_pos["Y"].append(sat_pos[1])
-                            dict_sat_pos["Z"].append(sat_pos[2])
-                            i_time_list += 1
-                            if i_time_list==len(time_list): break
-                            date = time_list[i_time_list]
-    
-                    # Case navigation data does not provide position until 00:00, use last available date 
-                    while i_time_list<len(time_list):
+            if sv[0] in ['G','E','C','J','I','C']:
+                i_time_list = 0
+                date = time_list[i_time_list]
+                # Intermediate dictionary intended to contain data of the satellite under process 
+                dict_sat_pos = {"time":[],"X":[],"Y":[],"Z":[]}
+                df_sat = df_sat[df_sat['sqrtA']!=0]
+                for t_nav, row in df_sat.iterrows():
+                    # Calculate position for each time in time_list that are before the next available position information
+                    while date < t_nav and i_time_list<len(time_list):
+                        #print (date,t_nav)
+                        #if sv=="G14": print ("\t",date)
                         sat_pos = ephemeris_to_XYZ(row,date)
                         dict_sat_pos["time"].append(date)
                         dict_sat_pos["X"].append(sat_pos[0])
@@ -770,35 +821,48 @@ class gnss:
                         i_time_list += 1
                         if i_time_list==len(time_list): break
                         date = time_list[i_time_list]
+    
+                # Case navigation data does not provide position until 00:00, use last available date 
+                while i_time_list<len(time_list):
+                    sat_pos = ephemeris_to_XYZ(row,date)
+                    dict_sat_pos["time"].append(date)
+                    dict_sat_pos["X"].append(sat_pos[0])
+                    dict_sat_pos["Y"].append(sat_pos[1])
+                    dict_sat_pos["Z"].append(sat_pos[2])
+                    i_time_list += 1
+                    if i_time_list==len(time_list): break
+                    date = time_list[i_time_list]
         
-                    df_sat = pd.DataFrame(dict_sat_pos)
-                    df_sat["time"] = pd.to_datetime(df_sat["time"])
-                    df_sat.set_index("time",inplace=True)
-                else:
-                    if const=='S': gap = '24h'
-                    else: gap = '3h'
-                    df_sat = split_interpolate_concat(df_sat[['X','Y','Z']], time_list, gap_threshold=gap)
+                df_sat = pd.DataFrame(dict_sat_pos)
+                df_sat["time"] = pd.to_datetime(df_sat["time"])
+                df_sat.set_index("time",inplace=True)
+            else:
+                if const=='S': gap = '24h'
+                else: gap = '3h'
+                print (sv)
+                print (df_sat)
+                df_sat = split_interpolate_concat(df_sat[['X','Y','Z']], time_list, gap_threshold=gap)
 
-                if len(df_sat)==0: 
-                    continue
-                d = self.datemin
-                n_expected_data = int(24*3600/self.resolution)
-                while d<self.datemax:
+            if len(df_sat)==0: 
+                continue
+            d = self.datemin
+            n_expected_data = int(24*3600/self.resolution)
+            while d<self.datemax:
                     
-                    year = d.year
-                    day = d.day
-                    doy = (d.date() - datetime.date(year,1,1)).days + 1
-                    df_day = df_sat[(df_sat.index.year == year) & (df_sat.index.day == day)]
+                year = d.year
+                day = d.day
+                doy = (d.date() - datetime.date(year,1,1)).days + 1
+                df_day = df_sat[(df_sat.index.year == year) & (df_sat.index.day == day)]
                     
-                    if (len(df_day)!=n_expected_data): 
-                        print ("Warning, "+sv+" has incomplete position time series for year:"+str(year)+" doy:"+str(doy),end=" -- ")
-                        print (len(df_day),"data point instead of",n_expected_data)
-                        print ("\t VTEC will be NaN for observation points falling within missing navigation time index:\n\t recommend adding more navigation rinex")
-                    feather_sat_file =  self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+".feather"
-                    df_day = df_day.reset_index().drop_duplicates(keep='first').set_index(df_day.index.name or 'index')
-                    df_day.to_feather(feather_sat_file)
+                if (len(df_day)!=n_expected_data): 
+                    print ("Warning, "+sv+" has incomplete position time series for year:"+str(year)+" doy:"+str(doy),end=" -- ")
+                    print (len(df_day),"data point instead of",n_expected_data)
+                    print ("\t VTEC will be NaN for observation points falling within missing navigation time index:\n\t recommend adding more navigation rinex")
+                feather_sat_file =  self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+".feather"
+                df_day = df_day.reset_index().drop_duplicates(keep='first').set_index(df_day.index.name or 'index')
+                df_day.to_feather(feather_sat_file)
                     
-                    d += datetime.timedelta(days=1)
+                d += datetime.timedelta(days=1)
                     
 
     def load_all_sats(self):
@@ -826,7 +890,7 @@ class gnss:
                     df_sv = pd.read_feather(feather_sat_file)
                     df_sv['sv']=sv
                     self.df_pos = pd.concat([self.df_pos,df_sv])
-                else: print (feather_sat_file, ' not existing')
+                #else: print (feather_sat_file, ' not existing')
                 d += datetime.timedelta(days=1)
                 
             

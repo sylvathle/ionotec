@@ -142,6 +142,7 @@ class tec:
 
             if station not in self.list_tec_stations.keys():
                 self.list_tec_stations[station] = tec_station([f_obs])
+                print (f_obs)
                 self.list_obs_stations.append(station)
             else:
                 self.list_tec_stations[station].add_f_obs(f_obs)
@@ -152,6 +153,7 @@ class tec:
 
         for station in self.list_tec_stations.keys():
             print ("Running tec for station: "+station)
+            
             self.list_station_df_obs[station] = self.list_tec_stations[station].run(self.h,self.rDCB_interval)
             #print (self.list_station_df_obs[station])
 

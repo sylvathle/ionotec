@@ -77,14 +77,23 @@ def resume_station(folder):
     stations
     '''
 
+    print (folder)
     search_dir = Path(folder)
-    files_o = [f for f in search_dir.rglob("*o") if f.is_file()]
-    files_d = [f for f in search_dir.rglob("*d") if f.is_file()]
-    files_crx = [f for f in search_dir.rglob("*crx") if f.is_file()]
-    files_rnx = [f for f in search_dir.rglob("*rnx") if f.is_file()]
+    files_o = [f for f in search_dir.rglob("*.*o") if f.is_file()]
+    files_d = [f for f in search_dir.rglob("*.*d") if f.is_file()]
+    files_crx = [f for f in search_dir.rglob("*.crx") if f.is_file()]
+    files_rnx = [f for f in search_dir.rglob("*.rnx") if f.is_file()]
 
     files = files_o+files_d+files_crx+files_rnx
-    
+    #list_stations=[]
+    #files = []
+    #for f in all_files:
+    #   name_station = f.name[:4]
+    #   if name_station in list_stations: continue
+    #   files.append(f)
+    #   list_stations.append(name_station)
+    #print (len(list_stations))
+
     d = {"station":[],"X":[],"Y":[],"Z":[],"resolution(s)":[]}
     for f in files:
         fname = f.name
@@ -92,22 +101,24 @@ def resume_station(folder):
         #print (f.replace(folder,""))
         #continue
         #if fname[-1]!="o": continue
+        if fname[:4].lower() in d['station']: continue
 
 
         #try: header = gr.rinexheader(f_path)
         try: 
             rx = rinex.rinex(f_path) 
             header = rx.read_header()
-        except ValueError:
+        except:
             print ("Error in file",f_path)
+            continue
         if "INTERVAL" in header.keys(): interval = float(header["INTERVAL"].replace(" ",""))
         else: interval = 1.0
         
         if header['type']!='O': continue
 
-        station = header['name_station']
+        station = header['name_station'].lower()
         #print (fname,station)
-        if station in d["station"]: continue
+        #if station in d["station"]: continue
         
         pos_antena = header['position']
         d["station"].append(station)
