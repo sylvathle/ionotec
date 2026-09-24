@@ -488,6 +488,69 @@ def remove_duplicated_dates(file_path):
     
     
 
+R_GEO = 42164e3  # km
+
+
+
+def sbas_unhealthy(health):
+    # bits 0-3 MT17 health; bit 4 MT17 unavailable; bit 5 URA index 15
+    h = health.fillna(63).astype(int)
+    return ((h & 32) != 0) | (((h & 16) == 0) & ((h & 15) != 0))
+
+def filter_sbas_eph(df, r_tol=300e3, lon_tol=1.0, res_tol_m=100.0, require_healthy=True):
+
+    if len(df)<2: return df
+
+    df = df.rename_axis('toc').reset_index().sort_values(['sv', 'toc']).reset_index(drop=True)
+    r = df[['X', 'Y', 'Z']].to_numpy(float)
+    v = df[['dX', 'dY', 'dZ']].to_numpy(float)
+    a = df[['dX2', 'dY2', 'dZ2']].to_numpy(float)
+    reasons = [[] for _ in range(len(df))]
+
+    def flag(mask, why):
+        for i in np.flatnonzero(np.asarray(mask)):
+            reasons[i].append(why)
+
+    unhealthy = sbas_unhealthy(df['health']).to_numpy()
+    flag(np.abs(np.linalg.norm(r, axis=1) - R_GEO) > r_tol, 'bad_radius')
+    #flag(np.linalg.norm(v, axis=1) == 0, 'zero_velocity')
+    lon = np.degrees(np.arctan2(r[:, 1], r[:, 0]))
+    med = pd.Series(lon).groupby(df['sv']).transform('median').to_numpy()
+    flag(np.abs(lon - med) > lon_tol, 'wrong_slot')
+
+    d = df.assign(n=[len(x) for x in reasons], unh=unhealthy)
+    keep = (d[d.n == 0].sort_values(['unh', 'URA', 'MessageFrameTime'], ascending=[True, True, False])
+                       .drop_duplicates(['sv', 'toc']).index)
+    flag((d.n == 0) & ~d.index.isin(keep), 'duplicate_toc')
+
+    # temporal consistency among rows passing geometry checks (health-independent)
+    ok = [i for i in range(len(df)) if not reasons[i]]
+    res_m = [0 for i in range(len(df))]
+    for sv, idx in df.loc[ok].groupby('sv').groups.items():
+        idx = list(idx); agree = dict.fromkeys(idx, False)
+        for i, j in zip(idx[:-1], idx[1:]):
+            dt = (df.at[j, 'toc'] - df.at[i, 'toc']).total_seconds()
+            if dt > 600: continue
+            fwd = np.linalg.norm(r[i] + v[i]*dt + .5*a[i]*dt**2 - r[j])
+            bwd = np.linalg.norm(r[j] - v[j]*dt + .5*a[j]*dt**2 - r[i])
+            if max(fwd, bwd) < res_tol_m:
+                agree[i] = agree[j] = True
+        for i, good in agree.items():
+            if not good: reasons[i].append('inconsistent_neighbours')
+
+    df['reasons'] = [','.join(x) for x in reasons]
+    df = df[df.reasons == '']
+    df.drop('reasons',axis=1,inplace=True)
+    df.rename(columns={'toc':'time'},inplace=True)
+    df.set_index('time',inplace=True)
+    #df.rename_axis('time',inplace=True)
+    return df#[df.reasons == ''], df[df.reasons != '']
+
+
+    #if require_healthy:
+    #    flag(unhealthy, 'unhealthy')
+    #df['reasons'] = [','.join(x) for x in reasons]
+    #return df[df.reasons == ''], df[df.reasons != '']
 
 
 class gnss:
@@ -509,7 +572,7 @@ class gnss:
     #f_doy_reported = ""
     
     
-    def __init__(self,datemin=None, datemax=None, list_satellites=[],reprocess=False):
+    def __init__(self,datemin=None, datemax=None, reprocess=False):
         self.gnss_dir = st.root_dir + "GNSS/"
         
         if not os.path.exists(self.gnss_dir):
@@ -518,7 +581,6 @@ class gnss:
                 if e.errno!=17: print ("FAIL creation of directory "+self.gnss_dir, e )
             else: print ("Successfully created the directory "+self.gnss_dir)
 
-        self.list_satellites = list_satellites
 
         """
          Suff const
@@ -530,16 +592,9 @@ class gnss:
          yyi  INRSS
          yyl  Galileo
         """       
-        convert_sv0_suff0 = {'G':'n','R':'g','E':'l','J':'q','S':'h','C':'f','I':'i'}
-        self.list_constellation = []
+        #convert_sv0_suff0 = {'G':'n','R':'g','E':'l','J':'q','S':'h','C':'f','I':'i'}
+        #self.list_constellation = []
 
-        self.list_excluded_satellites = ["C56","C57","C58","C61","J06"]
-
-        self.list_satellites = sorted(self.list_satellites)
-
-        for sv in self.list_excluded_satellites:
-            if sv in self.list_satellites:
-                self.list_satellites.remove(sv)
               
               
         self.datemin = datemin
@@ -553,51 +608,62 @@ class gnss:
         self.resolution = 60
         
         d = self.datemin
-        n_expected_data = int(24*3600/self.resolution)
-        self.list_sat_to_reprocess = []
+        #n_expected_data = int(24*3600/self.resolution)
+        #self.list_sat_to_reprocess = []
+
+        list_doy_to_process = []
+
 
         while d<self.datemax:
             year = d.year
             day = d.day
             doy = (d.date() - datetime.date(year,1,1)).days + 1
-           
-            for sv in self.list_satellites:
-                feather_sat_file =  self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+".feather"
-                # If the file doesn't exist then this day needs to be processed
-                if not os.path.exists(feather_sat_file): 
-                    self.list_sat_to_reprocess.append(sv)
-                    #print ('No position file for satellite',sv)
-                else:
-                    df_day = pd.read_feather(feather_sat_file)
-                    if len(df_day)!=n_expected_data: 
-                        self.list_sat_to_reprocess.append(sv)
-                        print ('Interval for day',doy,'not complete for satellite',sv)
+
+            yeardoy_folder =  Path(self.gnss_dir+str(year)+"/"+str(doy)+"/")
+            
+            file_count = sum(1 for p in yeardoy_folder.glob('*.feather') if p.is_file())
+            if file_count==0: list_doy_to_process.append((year,doy))
+        #   
+        #    for sv in self.list_satellites:
+        #        feather_sat_file =  self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+".feather"
+        #        # If the file doesn't exist then this day needs to be processed
+        #        if not os.path.exists(feather_sat_file): 
+        #            self.list_sat_to_reprocess.append(sv)
+        #        else:
+        #            df_day = pd.read_feather(feather_sat_file)
+        #            if len(df_day)!=n_expected_data: 
+        #                self.list_sat_to_reprocess.append(sv)
+        #                print ('Interval for day',doy,'not complete for satellite',sv)
             d += datetime.timedelta(days=1)
 
         #if not len(self.list_sat_to_reprocess) and not reprocess: 
-        #    #print ("No need to reprocess GNSS position, all needed satellite ready")
+        #    print ("No need to reprocess GNSS position, all needed satellite ready")
         #    return
         #else:
         #    print ("Looking for files from IGS, and reprocessing")
             
-        n_file_downloaded = {'n':12,'g':12,'l':14,'q':12,'f':12,'i':12,'h':12}
+        #n_file_downloaded = {'n':12,'g':12,'l':14,'q':12,'f':12,'i':12,'h':12}
     
         directory_GNSS_path = Path(self.gnss_dir)
         
         f_nav = []
 
-        list_const_suff = []
-        for sv in self.list_sat_to_reprocess:
-           suff0 = convert_sv0_suff0[sv[0]]
-           if suff0 not in list_const_suff:
-              list_const_suff.append(suff0)
-           if sv[0] not in self.list_constellation:
-              self.list_constellation.append(sv[0])
+        #list_const_suff = []
+        #for sv in self.list_sat_to_reprocess:
+        #   suff0 = convert_sv0_suff0[sv[0]]
+        #   if suff0 not in list_const_suff:
+        #      list_const_suff.append(suff0)
+        #   if sv[0] not in self.list_constellation:
+        #      self.list_constellation.append(sv[0])
+        list_stations = ['brd4','brdc']
+
+        for (year,doy) in list_doy_to_process:
+            #print (year,doy)
             
-        d = self.datemin-datetime.timedelta(days=1)
-        while d<self.datemax+datetime.timedelta(days=1):
-            year = d.year
-            doy = (d.date() - datetime.date(year,1,1)).days + 1
+        #d = self.datemin-datetime.timedelta(days=1)
+        #while d<self.datemax+datetime.timedelta(days=1):
+            #year = d.year
+            #doy = (d.date() - datetime.date(year,1,1)).days + 1
             n_files_ready = 0
 
             #for c in list_const_suff:
@@ -646,39 +712,38 @@ class gnss:
             #        list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=list_stations,nfirst=len(list_stations))
             #        for f in list_downloaded: 
             #            if Path(f) not in f_nav: f_nav.append(Path(f))
-            d += datetime.timedelta(days=1)
-            continue
+            #d += datetime.timedelta(days=1)
+            #continue
             suff = str(year-2000)+'p'
-            print ('supposed to download here')
+            #print ('supposed to download here')
             directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/')
             directory_GNSS_path_const.mkdir(parents=True,exist_ok=True)
-            list_stations = ['brd4','brdc']
             #if os.path.exists(directory_GNSS_path_const):
 
             for station in list_stations:
                 rinex_folder = self.gnss_dir+str(year)+'/'+str(doy)
                 station_file = get_file_by_prefix(rinex_folder, station)
-                print ('station_file',station_file)
+                #print ('station_file',station_file)
                 if station_file:
                     f_nav.append(station_file)
                     continue
                 else:
-                    print ('download', station)
+                    #print ('download', station)
                     list_downloaded =  igs.get_rinex_from_cddis(year,doy,suff, self.gnss_dir ,list_stations=[station],nfirst=1)
-                    print ('downloaded!')
+                    #print ('downloaded!')
                     if len(list_downloaded)==1:
                         f_nav.append(Path(list_downloaded[0]))
                         break
 
-            print (f_nav)
+            #print (f_nav)
                 
             d += datetime.timedelta(days=1)
                 
         self.list_f_rinex_nav = f_nav
       
-        print ('compute position')
-        print (self.list_f_rinex_nav)
-        #self.compute_position()
+        #print ('compute position')
+        #print (self.list_f_rinex_nav)
+        self.compute_position()
         #sys.exit()
 
     
@@ -691,14 +756,13 @@ class gnss:
         ##for const in self.list_constellation:
         #    self.df_nav_gnss[const] = pd.DataFrame()
 
-        print (list_f_rinex)
-        self.list_f_rinex_nav = list_f_rinex
+        #print (list_f_rinex)
+        #self.list_f_rinex_nav = list_f_rinex
 
         #print (self.list_f_rinex_nav)
 
         for f_rinex_nav in self.list_f_rinex_nav:
 
-            print (f_rinex_nav)
             nav = rx.rinex(str(f_rinex_nav))
            # try: nav = rx.rinex(str(f_rinex_nav))
            # except: continue
@@ -709,6 +773,7 @@ class gnss:
             for sv in list_df_nav.keys():
                 if sv not in self.df_nav_gnss.keys(): self.df_nav_gnss[sv] = list_df_nav[sv]
                 else: self.df_nav_gnss[sv] = pd.concat([self.df_nav_gnss[sv],list_df_nav[sv]])
+
 
 
             #print (list_df_nav)
@@ -780,14 +845,17 @@ class gnss:
       
         #for sv in self.list_sat_to_reprocess:
         for sv in self.df_nav_gnss.keys():
-            if sv not in self.df_nav_gnss.keys(): continue
+            #if sv[0]!='S': continue
+            #if sv not in self.df_nav_gnss.keys(): continue
 
+            #print (self.df_nav_gnss[sv])
             df_sat = self.df_nav_gnss[sv]
+            #print (df_sat[['sv','health','URA']])
+            #continue
 
             #df_sv = self.df_nav_gnss[sv]
             df_sat.set_index('time',inplace=True)
             df_sat.index = pd.to_datetime(df_sat.index)
-
 
             const = sv[0]
 
@@ -797,7 +865,23 @@ class gnss:
             if const in ["R","S"]:
                 df_sat = drop_duplicate_ephemeris_glonass(df_sat)
 
+
+
             df_sat = df_sat[~df_sat.index.duplicated(keep="first")]
+            #df_sat.to_csv('S32.csv')
+
+            if const in ['S']:
+                #print (df_sat.columns)
+               # print (sv)
+                df_sat.to_csv(sv+'.csv')
+                #print (len(df_sat))
+                df_sat = filter_sbas_eph(df_sat)
+                #print (len(df_sat))
+
+            ##print ('-----------------')
+            #print (df_sat)
+            #sys.exit()
+
 
             if len(df_sat)<3: continue
 
@@ -839,8 +923,6 @@ class gnss:
             else:
                 if const=='S': gap = '24h'
                 else: gap = '3h'
-                print (sv)
-                print (df_sat)
                 df_sat = split_interpolate_concat(df_sat[['X','Y','Z']], time_list, gap_threshold=gap)
 
             if len(df_sat)==0: 
@@ -861,11 +943,13 @@ class gnss:
                 feather_sat_file =  self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+".feather"
                 df_day = df_day.reset_index().drop_duplicates(keep='first').set_index(df_day.index.name or 'index')
                 df_day.to_feather(feather_sat_file)
+                #df_day.to_csv(feather_sat_file.replace('feather','csv'))
+
                     
                 d += datetime.timedelta(days=1)
                     
 
-    def load_all_sats(self):
+    def load_all_sats(self, list_satellites):
 
         '''
             Constellation: G: GPS
@@ -875,6 +959,13 @@ class gnss:
     
         ##year = d_in.year
         #first = True
+
+        self.list_satellites = list_satellites
+        self.list_excluded_satellites = ["C56","C57","C58","C61","J06"]
+        self.list_satellites = sorted(self.list_satellites)
+        for sv in self.list_excluded_satellites:
+            if sv in self.list_satellites:
+                self.list_satellites.remove(sv)
 
         self.df_pos = pd.DataFrame()
 
@@ -917,6 +1008,8 @@ class gnss:
 
         folder = Path(gnss_data_dir)
         list_gnss = [f for f in folder.glob(const+'*feather') if f.is_file()]
+list_sv = [f from ]
+list_sv = [f from ]
         
 
         for fgnss in list_gnss:

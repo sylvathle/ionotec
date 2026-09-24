@@ -75,16 +75,16 @@ R_E = 6371000
 
 class tec:
 
-    def __init__(self):
+    def __init__(self,datemin,datemax):
 
         #Resolution that will be used for the process (should by 60 seconds)
         #self.resolution = 60
         self.h = 350000
         self.rDCB_interval = timedelta(days=3)
 
-        self.list_obs_stations = []
-        self.list_tec_stations = {}
-        self.list_station_df_obs = {}
+
+
+        self.gnss = gnss.gnss(datemin=datemin,datemax=datemax)
 
     def set_root_dir(self,root_dir):
         st.root_dir = root_dir
@@ -124,7 +124,12 @@ class tec:
         
         # File containing satellite bias
         #self.list_f_dcb = list_f_dcb if not list_f_dcb is None else []
+        folder = st.root_dir + "TEC/"
+        Path(folder).mkdir(parents=True, exist_ok=True)
 
+        self.list_obs_stations = []
+        self.list_tec_stations = {}
+        self.list_station_df_obs = {}
 
 
         if not os.path.exists(st.root_dir + "TEC/"):
@@ -141,14 +146,13 @@ class tec:
             station = f_obs.name[:4].lower()
 
             if station not in self.list_tec_stations.keys():
-                self.list_tec_stations[station] = tec_station([f_obs])
-                print (f_obs)
+                self.list_tec_stations[station] = tec_station([f_obs],nav=self.gnss)
                 self.list_obs_stations.append(station)
             else:
                 self.list_tec_stations[station].add_f_obs(f_obs)
 
         Path(st.root_dir).mkdir(parents=True, exist_ok=True)
-        print ("Output directory is :",st.root_dir)
+        #print ("Output directory is :",st.root_dir)
 
 
         for station in self.list_tec_stations.keys():
@@ -165,7 +169,7 @@ class tec:
 
 class tec_station:
 
-    def __init__(self,list_f_obs):
+    def __init__(self,list_f_obs,nav):
         
         self.list_f_obs = list_f_obs
 
@@ -177,6 +181,9 @@ class tec_station:
         self.station = ""
         self.datemin = None
         self.datemax = None
+
+
+        self.gnss = nav
         
 
     def add_f_obs(self,f_obs):
@@ -184,6 +191,9 @@ class tec_station:
 
 
     def load_files(self):
+        
+        self.list_df = {}
+        self.channels = {}
 
         for f_obs in sorted(self.list_f_obs):
 
@@ -234,8 +244,7 @@ class tec_station:
         for const in self.list_df.keys():
             list_all_sv += self.list_df[const]['sv'].unique().tolist()            
 
-        self.gnss = gnss.gnss(datemin=self.datemin,datemax=self.datemax,list_satellites=list_all_sv)
-        self.gnss.load_all_sats()        
+        self.gnss.load_all_sats(list_satellites=list_all_sv)        
 
         self.sat_dcb = DCB.load_dcb(datemin=self.datemin,datemax=self.datemax)
 
@@ -503,6 +512,7 @@ class tec_station:
 
             self.list_df[const] = pd.DataFrame()
             if len(df_beidu_2_6)!=0: self.list_df[const] = pd.concat([self.list_df[const],df_beidu_2_6])
+            #print (self.list_df[const])
             if len(df_beidu_2_7)!=0: self.list_df[const] = pd.concat([self.list_df[const],df_beidu_2_7])
 
 
@@ -1146,20 +1156,33 @@ class tec_station:
         #print ("Load files")
         self.load_files()
 
+        
+
         #print ("RINEX to STEC")
         self.rinex_to_stec()
+
+        #for const in self.list_df.keys():
+        #    print (self.list_df[const])
         
         #print ("Add GNSS Navigation Information (IPP & Elevation)")
         self.add_satellite_pos()
+
+        #for const in self.list_df.keys():
+        #    print (self.list_df[const])
         
         #print ("Correct Slant TEC discontinuities and baseline")
         self.add_baseline()
+
+        #for const in self.list_df.keys():
+        #    print (self.list_df[const])
+
 
         #print ("Calculating receiver DCB, correct Slant TEC, compute VTEC")
 
         self.df_obs = pd.DataFrame()
 
         for const in self.list_df.keys():
+            #print (self.list_df[const])
             self.df_obs = pd.concat([
                self.df_obs,
                self.list_df[const][["sv","C1","C2","lat","lon","elevation","cos_chi","STEC","dcb"]]
@@ -1176,8 +1199,8 @@ class tec_station:
                 for year in self.df_obs.index.year.unique():
                     # Filter the dataframe for the current year
                     df_year = self.df_obs[self.df_obs.index.year == year]
-                    folder = st.root_dir + "TEC/" + str(year) + "/"
-                    Path(folder).mkdir(parents=True, exist_ok=True)
+                    folder = st.root_dir + "TEC/"
+                    #Path(folder).mkdir(parents=True, exist_ok=True)
                     feather_path = folder + self.station
                     df_year.to_feather(feather_path+".feather")
             return self.df_obs.dropna(subset=["STEC","VTEC"])

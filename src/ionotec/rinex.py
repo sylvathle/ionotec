@@ -287,7 +287,7 @@ class rinex:
                 #nav = gr.load(self.rinex_path)
                 #self.df_nav = nav.to_dataframe()
 
-                print (self.header['constellation'])
+                #print (self.header['constellation'])
 
                 if self.header['constellation']=='M':
                     nav = self.read_nav3_mixed()
@@ -1188,7 +1188,7 @@ class rinex:
                 self.line = self.file.readline()
                 continue
 
-            if self.line[10:14] in ['LNAV','FNAV','CNAV','D1  ','D2  ']: 
+            if self.line[10:14] in ['LNAV','FNAV','D1  ','D2  ']: 
                 self.read_ephemerids()
             elif self.line[10:14] in ['FDMA','SBAS']: 
                 self.read_ecef()

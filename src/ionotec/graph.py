@@ -1,215 +1,249 @@
+
 import matplotlib.pyplot as plt
-import pandas as pd
-import sys
 import numpy as np
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-#import plotly.express as px
-from ionotec import stations
-
-from pathlib import Path
+import math
+import seaborn as sns
 import cartopy.crs as ccrs
-import cartopy. feature as cfeature
-from cartopy.mpl.geoaxes import GeoAxes
-#import cartopy.io.img_tiles as cimgt
+import cartopy.feature as cfeature
+import matplotlib.dates as mdates
+import matplotlib.gridspec as gridspec
+from matplotlib.colors import to_rgba
 
-from scipy.interpolate import RBFInterpolator
+import colorsys
 
-# create output dir
-base_dir = Path(sys.argv[0]).resolve().parent
-target_dir = base_dir / "output/TEC/Figs"
-target_dir.mkdir(parents=True, exist_ok=True)
-target_dir = str(target_dir)
+def contrast_palette(n, s=0.9, l_levels=(0.35, 0.55, 0.70)):
+    phi = 0.618033988749895                    # golden ratio conjugate
+    return [colorsys.hls_to_rgb((i * phi) % 1.0,
+                                l_levels[i % len(l_levels)],
+                                s)
+            for i in range(n)]
 
-def plot_station(df_station,station_name,mozaic=False):
 
-    list_sats = df_station["sv"].unique()
+def plot_tracks(df,dest_folder='',lat_station=None,lon_station=None,station=''):
+    # Get unique 'sv' values to assign distinct colors
+    unique_svs = df['sv'].unique()
+    num_svs = len(unique_svs)
 
-    #print (station_name)
-    #print (list_sats)
+    datemin = min(df.index)
+    datemax = max(df.index)
 
-    if mozaic:
-        fig, axs = plt.subplots(4,2,figsize=(28,20),sharex=True,sharey=True)
+    str_d1 = datemin.strftime("%Y%m%d")
+    str_d2 = datemax.strftime("%Y%m%d")
 
-        i,j=0,0
-        n_sat = 0
-        n=0
-        N=0
-        for sat in list_sats:
-            i = int(n/2)
-            j = n%2
-            df_sat = df_station[df_station["sv"]==sat]
-            axs[i,j].plot(df_sat["VTEC"],'b.',markersize=2)
-            axsx = axs[i,j].twinx()
-            axsx.plot(df_sat["elevation"]*180/3.1415926535,'r.',markersize=2,alpha=0.5)
-            axsx.set_ylim([0,90])
-            axs[i,j].set_title(sat,fontsize=15)
-            axs[i,j].grid(True)
-            axs[i,j].set_ylabel("VTEC",fontsize=15)
-            axsx.set_ylabel("elevation")
-            axsx.spines['right'].set_color('red')
-            axsx.tick_params(axis='y', colors='red')
-            axsx.yaxis.label.set_color('red')
 
-            n = n+1
-            n_sat = n_sat+1
+    # Generate a color palette with sufficient contrast for each 'sv'
+    # Using sns.hls_palette directly to control saturation (s) and lightness (l)
+    #colors = sns.hls_palette(num_svs, l=.5, s=.9)
+    #sv_to_color = {sv: colors[i] for i, sv in enumerate(unique_svs)}
 
-            if n==8:
-                n=0
-                plt.savefig(target_dir+"/"+station_name+"-"+str(N)+".png",bbox_inches='tight')
-                plt.close()
-                fig, axs = plt.subplots(4,2,figsize=(28,20),sharex=True,sharey=True)
-                N = N+1
-        if n!=0:
-            plt.savefig(target_dir+"/"+station_name+"-"+str(N)+".png",bbox_inches='tight')
-            plt.close()
-            
+    colors = contrast_palette(num_svs)
+    sv_to_color = {sv: colors[i] for i, sv in enumerate(unique_svs)}
 
-    else:
-        fig, axs = plt.subplots(1,figsize=(40,21),sharex=True,sharey=True)
 
-        #station_name = station_name.split("/")[-1]
-        print (station_name)
-        i,j=0,0
-        n_sat = 0
-        n=0
-        N=0
-        min_t, max_t = min(df_station.index), max(df_station.index)
-        first_GPS = True
-        first_GLONASS = True
-        for sat in list_sats:
-            df_sat = df_station[df_station["sv"]==sat]
-            if sat[0]=="G": 
-                if first_GPS: 
-                    sc1 = axs.scatter(df_sat.index,df_sat["VTEC"].values,s=25,c=df_sat["elevation"]*180/np.pi,cmap="YlGnBu",vmin=0,vmax=90)
-                    first_GPS=False
-                else:
-                    axs.scatter(df_sat.index,df_sat["VTEC"].values,s=25,c=df_sat["elevation"]*180/np.pi,cmap="YlGnBu",vmin=0,vmax=90)
-            if sat[0]=="R": 
-                if first_GLONASS: 
-                    sc2 = axs.scatter(df_sat.index,df_sat["VTEC"].values,s=25,c=df_sat["elevation"]*180/np.pi,cmap="PuRd",vmin=0,vmax=90)
-                    first_GLONASS=False
-                else:
-                    axs.scatter(df_sat.index,df_sat["VTEC"].values,s=25,c=df_sat["elevation"]*180/np.pi,cmap="PuRd",vmin=0,vmax=90)
-            axs.tick_params(axis='both', which='major', labelsize=25)
-            axs.tick_params(axis='both', which='minor', labelsize=25)
-            axs.set_title(station_name+" "+min_t.strftime("%d/%m/%Y %H:%M:%S") + " - " + max_t.strftime("%d/%m/%Y %H:%M:%S") ,fontsize=30)
-            axs.grid(True)
-            axs.set_ylabel("VTEC(TECu)",fontsize=30)
+    fig = plt.figure(figsize=(18, 9)) # Adjust figure size for better readability
+    ax = fig.add_subplot(111) # Get the main axis
 
-        ## Add station location on the plot
-        #ax_map = inset_axes(axs, width="20%", height="25%", loc='upper right', borderpad=2)
-        #ax_inset.set_extent([-90, -30, -60, 15]) 
-        #ax_inset.set_xticks([])
-        #ax_inset.set_yticks([])
- 
-        #df_stations = pd.read_csv(stations.csv_stations).set_index("station")
-        #pos = df_stations.loc[station_name]
 
-        #request = cimgt.QuadtreeTiles()
-        #sys.exit()
-        '''ax_map = inset_axes(
-            axs,
-            width="20%",      # very narrow
-            height="35%",    # short bar
-            loc="upper left",
-            bbox_to_anchor=(0.02,-0.05,1.0,1.0),
-            borderpad=0,
-            bbox_transform=axs.transAxes,
-            axes_class=GeoAxes,
-            axes_kwargs=dict(projection=ccrs.PlateCarree())
-            #axes_kwargs=dict(projection=request.crs)
-        
-        )
+    # Remove plt.tight_layout to allow the inset map to overlap the main scatter plot
 
-        ax_map.patch.set_alpha(0.0)
-        ax_map.set_facecolor('none')
-        
-        #ax_map.add_image(request, 8)
-        #ax_map.set_title("Station Location")
-        #ax_map = plt.axes(projection=ccrs.PlateCarree())
+    if isinstance(lat_station, float) and isinstance(lon_station, float):
+        # Add the world map inset (bottom-left, Mollweide projection, no ocean, no label, no borders)
+        ax_map = fig.add_axes([0.14, 0.68, 0.18, 0.18], projection=ccrs.Mollweide(), zorder=1) # Adjusted position, map should be behind scatter plot
+
+        ax.set_zorder(2)          # main axes drawn after (above) the inset
+        ax.patch.set_visible(False)  # let the map show through
+
+        ax_map.set_global() # Set global extent for Mollweide projection
+        ax_map.add_feature(cfeature.LAND)
+        ax_map.add_feature(cfeature.COASTLINE)
+        ax_map.plot(lon_station, lat_station, 'r*', markersize=10, transform=ccrs.PlateCarree()) # Removed label
+
+
+
+    for (sv, C1, C2), group in df.groupby(['sv', 'C1', 'C2']):
+        alpha = np.clip(group['elevation'].to_numpy() / (180), 0, 1)
+
+        r, g, b, _ = to_rgba(sv_to_color[sv])
+        rgba = np.column_stack([
+            np.full(len(alpha), r),
+            np.full(len(alpha), g),
+            np.full(len(alpha), b),
+            alpha,
+        ])
+
+        ax.scatter(group.index, group['VTEC'],
+               c=rgba,          # per-point RGBA, alpha included
+               s=18,
+               linewidths=0,    # avoid edge colors ignoring alpha
+               zorder=1)
+
+    # Iterate through each unique combination of (sv, C1, C2)
+    #for (sv, C1, C2), group in df.groupby(['sv', 'C1', 'C2']):
+    #    # Calculate alpha based on elevation (normalized from 0 to pi/2)
+    #    group_alpha = group['elevation'] / (math.pi / 2)
+    #    # Clip alpha values to ensure they are within the valid range [0, 1]
+    #    group_alpha = np.clip(group_alpha, 0, 1)
+#
+#        # Get the color assigned to the current satellite (sv)
+#        color = sv_to_color[sv]
+#
+#        # Plot VTEC vs. time for the current group with calculated alpha and color
+#        ax.scatter(group.index, group['VTEC'],
+#                c=[color], # 'c' expects a sequence of colors or a single color
+#                alpha=group_alpha,
+#                s=18,
+#                zorder=1) # Scatter plot should be on top
+
+    # Plot modifications
+    ax.set_xlabel('') # No xlabel as requested
+    ax.set_ylabel('VTEC (TECu)', fontsize=14) # Changed ylabel and increased font size
+    ax.set_title(station, fontsize=16) # Changed title and increased font size
+    ax.grid(True, linestyle='--', alpha=0.7)
+    ax.tick_params(axis='x', rotation=0, labelsize=12) # No rotation, increased font size
+    ax.tick_params(axis='y', labelsize=12) # Increased font size
+
+    # Use DateFormatter for x-axis ticks (only month and day)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+    # Use AutoDateLocator to ensure appropriate tick spacing
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+
+
+
+    plt.savefig(dest_folder+'/simple_'+station+'_'+str_d1+'_'+str_d2+'.png',bbox_inches='tight')
+
+
+
+
+
+
+
+
+
+def plot_tracks_individuals(df,dest_folder='',station=''):
+
+    # Get unique 'sv' values to assign distinct colors
+    unique_svs = df['sv'].unique()
+    num_svs = len(unique_svs)
+
+    datemin = min(df.index)
+    datemax = max(df.index)
+
+    str_d1 = datemin.strftime("%Y%m%d")
+    str_d2 = datemax.strftime("%Y%m%d")
+
+
+
+    colors = contrast_palette(num_svs)
+    sv_to_color = {sv: colors[i] for i, sv in enumerate(unique_svs)}
+
+    # --- Determine global x and y limits for shared axes ---
+    xmin = df.index.min()
+    xmax = df.index.max()
+    x_margin = 0.02*(xmax-xmin)
+    xmin = xmin - x_margin
+    xmax = xmax + x_margin
+
+    ymin = df['VTEC'].min()
+    ymax = df['VTEC'].max()
+    y_margin = 0.1*(ymax-ymin)
+    ymin = ymin - y_margin
+    ymax = ymax + y_margin
+
+    # --- Determine layout for subplots ---
+    svs_per_small_plot = 4
+    num_small_plot_rows = math.ceil(num_svs / svs_per_small_plot)
+    num_cols_for_small_plots = 2 # Let's use 2 columns for the smaller plots
+
+    # Total rows for gridspec: 1 for main plot + num_small_plot_rows
+    num_rows_total = 1 + num_small_plot_rows
+
+    fig = plt.figure(figsize=(25, 5 * num_rows_total)) # Adjust figure size dynamically
+
+    gs = gridspec.GridSpec(num_rows_total, num_cols_for_small_plots, figure=fig)
+
+    # --- Main axis for all tracks (without map) ---
+    ax_main = fig.add_subplot(gs[0, :]) # Spans all columns in the first row
+
+    for (sv, C1, C2), group in df.groupby(['sv', 'C1', 'C2']):
+        group_alpha = np.clip(group['elevation'] / (math.pi / 2), 0, 1)
+        color = sv_to_color[sv]
+        ax_main.scatter(group.index, group['VTEC'],
+                    c=[color],
+                    alpha=group_alpha,
+                    s=10)
+
+    ax_main.set_xlabel('')
+    ax_main.set_ylabel('VTEC (TECu)', fontsize=20) # Increased font size
+    ax_main.set_title('mdo1', fontsize=25) # Increased font size
+    ax_main.grid(True, linestyle='--', alpha=0.7)
+    ax_main.tick_params(axis='x', rotation=0, labelsize=20)
+    ax_main.tick_params(axis='y', labelsize=20) # Increased font size
+    ax_main.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+    ax_main.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax_main.set_xlim(xmin, xmax) # Apply global x-limits
+    ax_main.set_ylim(ymin, ymax) # Apply global y-limits
+
+
+    # --- Create and populate smaller axes (4 svs each) ---
+    row_idx = 1 # Start from the second row for small plots
+    col_idx = 0
+
+    for i in range(0, num_svs, svs_per_small_plot):
+        current_svs = unique_svs[i : i + svs_per_small_plot]
+
+        # Create subplot for this group of SVs
+        ax_small = fig.add_subplot(gs[row_idx, col_idx])
+
+        legend_handles = []
+
+        for sv_to_plot in current_svs:
+            # Filter for the specific sv_to_plot and iterate through its C1, C2 combinations
+            sv_groups = df[df['sv'] == sv_to_plot].groupby(['sv', 'C1', 'C2'])
     
-        # 3. Add geographic features
-        #ax_map.add_feature(cfeature.COASTLINE)
-        #ax_map.add_feature(cfeature.BORDERS, linestyle=':')
-        #ax_map.add_feature(cfeature.LAND, facecolor='lightgray', alpha=0.3)
-        ax_map.add_feature(cfeature.OCEAN, facecolor='none',alpha=0.0) # Light blue
-        ax_map.add_feature(cfeature.LAND, facecolor='#F5F5F5', edgecolor='none') # Soft gray-white
-        ax_map.add_feature(cfeature.COASTLINE, linewidth=0.6, edgecolor='#555555')
-        ax_map.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5, edgecolor='#999999')
-        ax_map.set_extent([-90, -30, -60, 15]) 
-
-        ax_map.spines['geo'].set_visible(False)
-        #ax_map.stock_img()
-
-        #ax_map.add_feature(cfeature.OCEAN, facecolor='none',alpha=0.0) # Light blue
-
-        
-
-        ax_map.scatter(pos['lon'], pos['lat'], color='darkred', 
-               s=80, marker='X', transform=ccrs.PlateCarree(), 
-               label='Observation points', zorder=5)
-
-        ax_map.text(pos['lon'], pos['lat'] + 2, station_name,
-                    transform=ccrs.PlateCarree(),
-                    fontsize=24,
-                    fontweight='bold',
-                    ha='center',        # Horizontal alignment: center
-                    va='bottom',        # Vertical alignment: bottom
-                    color='black')
-        '''
-        
-        if not first_GPS:
-            cax1 = inset_axes(
-                axs,
-                width="15%",      # very narrow
-                height="5%",    # short bar
-                loc="upper right",
-                bbox_to_anchor=(0,0,0.99,0.99),
-                borderpad=0,
-                bbox_transform=axs.transAxes
-            )
-            cbar1 = fig.colorbar(sc1, cax=cax1, orientation='horizontal',location='top')
-            #cbar = fig.colorbar(sc, cax=cax)
-            cbar1.ax.set_title("GPS elevation",fontsize=25,y=0.17)
-
-            if not first_GLONASS:
-                cbar1.ax.tick_params(length=0)
-                cbar1.set_ticks([])
-            #cbar1.ax.xaxis.set_label_position('left')
-
-        if not first_GLONASS:
-            cax2 = inset_axes(
-                axs,
-                width="15%",      # very narrow
-                height="5%",    # short bar
-                loc="upper right",
-                bbox_to_anchor=(0,-0.055,0.99,0.99),
-                borderpad=0,
-                bbox_transform=axs.transAxes
-            )
-            
-        
-
-
-            cbar2 = fig.colorbar(sc2, cax=cax2, orientation='horizontal',location='bottom')
-            #cbar = fig.colorbar(sc, cax=cax)
-            cbar2.ax.set_title("GLONASS elevation",fontsize=25,y=0.17)
-        
-
-        #cbar2 = fig.colorbar(sc2, ax=cax,pad=0.04)
-        #cbar2.set_label("GLONASS elevation",fontsize=30)
-
-        #cbar1.ax.tick_params(labelsize=10, length=3)
-        #cbar2.ax.tick_params(labelsize=10, length=3)
-        
-        # Increase tick size
-        #cbar1.ax.tick_params(labelsize=25)
-        #cbar2.ax.tick_params(labelsize=25)
-
-        # Optional: increase tick width & length
-        #cbar1.ax.tick_params(width=2, length=6)
-        #cbar2.ax.tick_params(width=2, length=6)
-
-        #print (station_name)
-        plt.savefig(target_dir+"/"+station_name+".png",bbox_inches='tight')
-
+            for (sv, C1, C2), group in sv_groups:
+                group_alpha = np.clip(group['elevation'] / (math.pi / 2), 0, 1)
+                color = sv_to_color[sv]
+    
+                ax_small.scatter(group.index, group['VTEC'],
+                                 c=[color],
+                                 alpha=group_alpha,
+                                 s=10)
+    
+            # Create a proxy artist for the legend entry for each SV
+            color = sv_to_color[sv_to_plot]
+            legend_handles.append(plt.Line2D([0], [0], marker='o', color='w', label=sv_to_plot,
+                                             markerfacecolor=color, markersize=8))
+    
+        # Removed title='SV' from legend and added fontsize
+        ax_small.legend(handles=legend_handles, loc='upper right', bbox_to_anchor=(1.0, 1.0), ncol=len(current_svs), fontsize=15)
+    
+        # No title for subaxes as requested
+        # ax_small.set_title(f'SVs: {', '.join(current_svs)}', fontsize=12)
+    
+        # Set y-label conditionally
+        if col_idx == 0: # Only for the left column
+            ax_small.set_ylabel('VTEC (TECu)', fontsize=18) # Increased font size
+            ax_small.tick_params(axis='y', labelsize=18) # Increased font size
+        else:
+            ax_small.set_ylabel('') # No ylabel for right column
+            ax_small.tick_params(axis='y', labelleft=False) # No y-ticks for right column
+    
+        ax_small.grid(True, linestyle='--', alpha=0.7)
+    
+        # Set x-axis labels/ticks on all subplots as requested
+        ax_small.tick_params(axis='x', rotation=0, labelsize=18) # Increased font size, always show
+        ax_small.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+        ax_small.xaxis.set_major_locator(mdates.AutoDateLocator())
+        ax_small.set_xlabel('') # Ensure no xlabel even for bottom plots
+    
+        ax_small.set_xlim(xmin, xmax) # Apply global x-limits
+        ax_small.set_ylim(ymin, ymax) # Apply global y-limits
+    
+        # Move to the next column/row for subplot placement
+        col_idx += 1
+        if col_idx >= num_cols_for_small_plots:
+            col_idx = 0
+            row_idx += 1
+    
+    plt.tight_layout() # Adjust layout to prevent overlaps
+    plt.savefig(dest_folder+'/full_'+station+'_'+str_d1+'_'+str_d2+'.png',bbox_inches='tight')

@@ -19,10 +19,16 @@ def filter_outsider_tracks(df,intervals_not_filtered):
         mask_intervals = mask_intervals | ((df_out.index>=interval[0]) & (df_out.index<interval[1]))
     df_not_filtered = df_out[mask_intervals]
     df_out = df_out[~mask_intervals]
-    print (len(df_not_filtered)+len(df_out),len(df))
     while True:
+
+        df_stats = df_out.groupby(df_out.index)["VTEC"].agg(
+            VTEC_mean="mean",
+            #VTEC_std_lower=lambda x: x[x < x.mean()].std(),
+            #VTEC_std_upper=lambda x: x[x > x.mean()].std(),
+        )
         
-        dict_metrics = {'sv':[],'C1':[],'C2':[],'ti':[],'tf':[],'av_diff':[],'av_std':[]}
+        #dict_metrics = {'sv':[],'C1':[],'C2':[],'ti':[],'tf':[],'av_diff':[],'av_std':[]}
+        dict_metrics = {'sv':[],'C1':[],'C2':[],'ti':[],'tf':[],'av_diff':[]}
         sv_channel = list(df_out[['sv', 'C1', 'C2']].drop_duplicates().itertuples(index=False, name=None))
         for (sv,C1,C2) in sv_channel:
             
@@ -48,15 +54,15 @@ def filter_outsider_tracks(df,intervals_not_filtered):
                 list_t.append(df_stat_segment.index[0]+(df_stat_segment.index[-1]-df_stat_segment.index[0])/2)
 
                 df_segment['VTEC_mean'] = df_stat_segment['VTEC_mean']
-                df_segment['VTEC_std_upper'] = df_stat_segment['VTEC_std_upper']
-                df_segment['VTEC_std_lower'] = df_stat_segment['VTEC_std_lower']
+                #df_segment['VTEC_std_upper'] = df_stat_segment['VTEC_std_upper']
+                #df_segment['VTEC_std_lower'] = df_stat_segment['VTEC_std_lower']
                 df_segment['diff_VTEC'] = df_segment['VTEC']-df_stat_segment['VTEC_mean']
-                df_segment['distance_sigma'] = np.nan
+                #df_segment['distance_sigma'] = np.nan
                 mask_over_mean = df_segment['diff_VTEC']>0
-                df_segment.loc[mask_over_mean,'distance_sigma'] = df_segment.loc[mask_over_mean,'diff_VTEC'] - df_segment.loc[mask_over_mean,'VTEC_std_upper']
-                df_segment.loc[~mask_over_mean,'distance_sigma'] = df_segment.loc[~mask_over_mean,'VTEC_std_lower'] - df_segment.loc[~mask_over_mean,'diff_VTEC']
+                #df_segment.loc[mask_over_mean,'distance_sigma'] = df_segment.loc[mask_over_mean,'diff_VTEC'] - df_segment.loc[mask_over_mean,'VTEC_std_upper']
+                #df_segment.loc[~mask_over_mean,'distance_sigma'] = df_segment.loc[~mask_over_mean,'VTEC_std_lower'] - df_segment.loc[~mask_over_mean,'diff_VTEC']
                 av_diff = abs(df_segment['diff_VTEC'].mean())
-                av_std = abs(df_segment['distance_sigma'].mean())
+                #av_std = abs(df_segment['distance_sigma'].mean())
                 if (av_diff<threshold): continue 
                 dict_metrics['sv'].append(sv)
                 dict_metrics['C1'].append(C1)
@@ -64,7 +70,9 @@ def filter_outsider_tracks(df,intervals_not_filtered):
                 dict_metrics['ti'].append(border[0])
                 dict_metrics['tf'].append(border[1])
                 dict_metrics['av_diff'].append(av_diff)
-                dict_metrics['av_std'].append(df_segment['distance_sigma'].mean())
+                #dict_metrics['av_std'].append(df_segment['distance_sigma'].mean())
+
+        
         
         df_metrics = pd.DataFrame(dict_metrics)
         if len(df_metrics)==0: break
@@ -82,5 +90,6 @@ def filter_outsider_tracks(df,intervals_not_filtered):
             mask = (df_out['sv']==row['sv']) & (df_out['C1']==row['C1']) & (df_out['C2']==row['C2'])
             df_out = df_out[~mask]
             list_t_intervals_affected.append([row['ti'],row['tf']])
+        break
             
     return pd.concat([df_not_filtered,df_out])
