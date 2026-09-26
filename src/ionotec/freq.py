@@ -21,6 +21,7 @@ def getFrequency(sv,chanel):
         elif chanel[1]=='2': return 1227.60 * 1e6
         elif chanel[1]=='5': return 1176.45 * 1e6
     elif sv[0]=='R':
+        if sv not in channel_glonass.keys(): return float('NaN')
         if chanel[1]=='1': return glonass_f1 + 1e6*channel_glonass[sv]*9/16
         elif chanel[1]=='2': return glonass_f2 + 1e6*channel_glonass[sv]*7/16
     elif sv[0]=='C':

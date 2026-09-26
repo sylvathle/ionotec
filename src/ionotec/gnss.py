@@ -618,8 +618,11 @@ class gnss:
             year = d.year
             day = d.day
             doy = (d.date() - datetime.date(year,1,1)).days + 1
+            str_doy = str(doy)
+            if doy<10: str_doy = '00' + str_doy
+            elif doy<100: str_doy ='0'+str_doy
 
-            yeardoy_folder =  Path(self.gnss_dir+str(year)+"/"+str(doy)+"/")
+            yeardoy_folder =  Path(self.gnss_dir+str(year)+"/"+str_doy+"/")
             
             file_count = sum(1 for p in yeardoy_folder.glob('*.feather') if p.is_file())
             if file_count==0: list_doy_to_process.append((year,doy))
@@ -716,12 +719,12 @@ class gnss:
             #continue
             suff = str(year-2000)+'p'
             #print ('supposed to download here')
-            directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str(doy)+'/')
+            directory_GNSS_path_const = Path(self.gnss_dir+str(year)+'/'+str_doy+'/')
             directory_GNSS_path_const.mkdir(parents=True,exist_ok=True)
             #if os.path.exists(directory_GNSS_path_const):
 
             for station in list_stations:
-                rinex_folder = self.gnss_dir+str(year)+'/'+str(doy)
+                rinex_folder = self.gnss_dir+str(year)+'/'+str_doy
                 station_file = get_file_by_prefix(rinex_folder, station)
                 #print ('station_file',station_file)
                 if station_file:
@@ -873,7 +876,6 @@ class gnss:
             if const in ['S']:
                 #print (df_sat.columns)
                # print (sv)
-                df_sat.to_csv(sv+'.csv')
                 #print (len(df_sat))
                 df_sat = filter_sbas_eph(df_sat)
                 #print (len(df_sat))
@@ -932,15 +934,25 @@ class gnss:
             while d<self.datemax:
                     
                 year = d.year
+                month = d.month
                 day = d.day
                 doy = (d.date() - datetime.date(year,1,1)).days + 1
-                df_day = df_sat[(df_sat.index.year == year) & (df_sat.index.day == day)]
+                #print (df_sat)
+                df_day = df_sat[(df_sat.index.year == year) & (df_sat.index.day == day) & (df_sat.index.month == month)]
+
+                str_doy = str(doy)
+                if doy<10: str_doy = '00' + str_doy
+                elif doy<100: str_doy ='0'+str_doy
+
+                feather_sat_file =  self.gnss_dir+str(year)+"/"+str_doy+"/"+sv+".feather"
+                if os.path.exists(feather_sat_file):
+                    d+=datetime.timedelta(days=1)
+                    continue
                     
                 if (len(df_day)!=n_expected_data): 
-                    print ("Warning, "+sv+" has incomplete position time series for year:"+str(year)+" doy:"+str(doy),end=" -- ")
+                    print ("Warning, "+sv+" has incomplete position time series for year:"+str(year)+" doy:"+str_doy,end=" -- ")
                     print (len(df_day),"data point instead of",n_expected_data)
                     print ("\t VTEC will be NaN for observation points falling within missing navigation time index:\n\t recommend adding more navigation rinex")
-                feather_sat_file =  self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+".feather"
                 df_day = df_day.reset_index().drop_duplicates(keep='first').set_index(df_day.index.name or 'index')
                 df_day.to_feather(feather_sat_file)
                 #df_day.to_csv(feather_sat_file.replace('feather','csv'))
@@ -976,7 +988,10 @@ class gnss:
             while d<self.datemax:
                 year = d.year
                 doy = (d.date() - datetime.date(year,1,1)).days + 1                
-                feather_sat_file =  self.gnss_dir+str(year)+"/"+str(doy)+"/"+sv+".feather"
+                str_doy = str(doy)
+                if doy<10: str_doy = '00' + str_doy
+                elif doy<100: str_doy ='0'+str_doy
+                feather_sat_file =  self.gnss_dir+str(year)+"/"+str_doy+"/"+sv+".feather"
                 if os.path.exists(feather_sat_file):
                     df_sv = pd.read_feather(feather_sat_file)
                     df_sv['sv']=sv

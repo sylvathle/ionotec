@@ -62,7 +62,7 @@ from . import gnss
 from . import reconstruction as reco
 
 
-#import warnings
+import warnings
 
 
 
@@ -82,6 +82,9 @@ class tec:
         self.h = 350000
         self.rDCB_interval = timedelta(days=3)
 
+        self.list_obs_stations = {}
+        self.list_tec_stations = {}
+        self.list_station_df_obs = {}
 
 
         self.gnss = gnss.gnss(datemin=datemin,datemax=datemax)
@@ -114,7 +117,7 @@ class tec:
 
 
 
-    def run(self,list_f_obs):
+    def run(self,list_f_obs, save=False):
         #self.h = h
 
         #self.list_f_obs = list_f_obs 
@@ -127,7 +130,7 @@ class tec:
         folder = st.root_dir + "TEC/"
         Path(folder).mkdir(parents=True, exist_ok=True)
 
-        self.list_obs_stations = []
+        self.list_obs_stations = {}
         self.list_tec_stations = {}
         self.list_station_df_obs = {}
 
@@ -147,7 +150,7 @@ class tec:
 
             if station not in self.list_tec_stations.keys():
                 self.list_tec_stations[station] = tec_station([f_obs],nav=self.gnss)
-                self.list_obs_stations.append(station)
+                #self.list_obs_stations.append(station)
             else:
                 self.list_tec_stations[station].add_f_obs(f_obs)
 
@@ -157,13 +160,15 @@ class tec:
 
         for station in self.list_tec_stations.keys():
             print ("Running tec for station: "+station)
-            
-            self.list_station_df_obs[station] = self.list_tec_stations[station].run(self.h,self.rDCB_interval)
-            #print (self.list_station_df_obs[station])
+            self.list_station_df_obs[station] = self.list_tec_stations[station].run(self.h,self.rDCB_interval,store=save)
+            self.list_obs_stations[station] = self.list_tec_stations[station].get_coordinates()
 
 
         return self.list_station_df_obs
 
+
+    def get_stations_coordinates(self):
+        return self.list_obs_stations
 
 
 
@@ -182,6 +187,8 @@ class tec_station:
         self.datemin = None
         self.datemax = None
 
+        self.coordinates = []
+
 
         self.gnss = nav
         
@@ -199,6 +206,11 @@ class tec_station:
 
             rfile = rx.rinex(f_obs)
             header = rfile.read_header()
+
+            if len(self.coordinates) == 0:
+                self.coordinates = header['coord']
+                #print (header)
+                #print (self.coordinates)
 
             ## Avoid running files that are not in the requested date range
             #datelim_cond = (
@@ -219,7 +231,6 @@ class tec_station:
                 else:
                     self.list_df[const] = df
 
-            
 
         self.datemin = None
         for constellation in self.list_df.keys():
@@ -247,6 +258,13 @@ class tec_station:
         self.gnss.load_all_sats(list_satellites=list_all_sv)        
 
         self.sat_dcb = DCB.load_dcb(datemin=self.datemin,datemax=self.datemax)
+
+
+
+
+    def get_coordinates(self):
+        print ('getcoordinates',self.coordinates)
+        return self.coordinates
 
 
 
@@ -958,6 +976,7 @@ class tec_station:
             mask_time = (self.df_obs.index>=d) & (self.df_obs.index<d+self.rDCB_interval)
      
             work = self.df_obs[mask_time].copy()
+            #if len(work)==0: continue
             mask = work["dcb"].isna()
             work["constellation"] = work["sv"].str[0]
             work.loc[mask, "constellation"] = work.loc[mask, "sv"].to_numpy()
@@ -1035,7 +1054,7 @@ class tec_station:
             df_br_interval = pd.DataFrame(j_labels, columns=["constellation", "C1", "C2"]).assign(DCB=B)
             df_br_interval['station'] = self.station
             df_br_interval['time_i'] =  d
-            df_br_interval['time_f'] =  max(work.index)
+            df_br_interval['time_f'] =  d+self.rDCB_interval #max(work.index)
             #min(max(self.df),max(self.df_obs.index))
             #df_br_interval.set_index('station',inplace=True)
             list_df_br.append(df_br_interval)
@@ -1196,13 +1215,13 @@ class tec_station:
 
         if len(self.df_obs)>0:
             if store:
-                for year in self.df_obs.index.year.unique():
-                    # Filter the dataframe for the current year
-                    df_year = self.df_obs[self.df_obs.index.year == year]
-                    folder = st.root_dir + "TEC/"
-                    #Path(folder).mkdir(parents=True, exist_ok=True)
-                    feather_path = folder + self.station
-                    df_year.to_feather(feather_path+".feather")
+                #for year in self.df_obs.index.year.unique():
+                # Filter the dataframe for the current year
+                #df_year = self.df_obs[self.df_obs.index.year == year]
+                folder = st.root_dir + "TEC/"
+                #Path(folder).mkdir(parents=True, exist_ok=True)
+                feather_path = folder + self.station
+                self.df_obs.to_feather(feather_path+".feather")
             return self.df_obs.dropna(subset=["STEC","VTEC"])
         else:
             return None

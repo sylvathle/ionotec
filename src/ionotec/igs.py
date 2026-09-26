@@ -34,9 +34,12 @@ def extract_gz_files(source_file,dest_file):
 
 def get_rinex_from_cddis(year,doy,suff,DEST_DIR_BASE,list_stations=None,nfirst=-1):
     
-    BASE_URL = "https://cddis.nasa.gov/archive/gnss/data/daily/"+str(year)+"/"+str(doy)+"/"+suff+"/"
+    str_doy = str(doy)
+    if doy<10: str_doy = '00'+str_doy
+    elif doy<100: str_doy = '0'+str_doy
+    BASE_URL = "https://cddis.nasa.gov/archive/gnss/data/daily/"+str(year)+"/"+str_doy+"/"+suff+"/"
     #DEST_DIR = "/home/sylvain/Documents/jupyter_project/TEC/receiver_dcb/rinex/IGS/"+str(year)+"/"+str(doy)+"/"+suff+"/"
-    DEST_DIR = DEST_DIR_BASE+str(year)+"/"+str(doy)+"/"+suff+"/"
+    DEST_DIR = DEST_DIR_BASE+str(year)+"/"+str_doy+"/"+suff+"/"
     #DEST_DIR = "./downloads/TEC/RINEX/IGS/"+str(year)+"/"+str(doy)+"/"+suff+"/"
 
     os.makedirs(DEST_DIR, exist_ok=True)
@@ -177,10 +180,14 @@ def get_dcb_from_cddis(year,doy,DEST_DIR_BASE):
     os.makedirs(DEST_DIR, exist_ok=True)
     session = requests.Session()
 
-    if os.path.exists(DEST_DIR+"CAS0MGXRAP_"+str(year)+str(doy)+"0000_01D_01D_DCB.BSX"): 
-        return DEST_DIR+"CAS0MGXRAP_"+str(year)+str(doy)+"0000_01D_01D_DCB.BSX"
-    if os.path.exists(DEST_DIR+"CAS0OPSRAP_"+str(year)+str(doy)+"0000_01D_01D_DCB.BIA"): 
-        return DEST_DIR+"CAS0OPSRAP_"+str(year)+str(doy)+"0000_01D_01D_DCB.BIA"
+    str_doy = str(doy)
+    if doy<10: str_doy = '00'+str_doy
+    elif doy<100: str_doy = '0'+str_doy
+
+    if os.path.exists(DEST_DIR+"CAS0MGXRAP_"+str(year)+str_doy+"0000_01D_01D_DCB.BSX"): 
+        return DEST_DIR+"CAS0MGXRAP_"+str(year)+str_doy+"0000_01D_01D_DCB.BSX"
+    if os.path.exists(DEST_DIR+"CAS0OPSRAP_"+str(year)+str_doy+"0000_01D_01D_DCB.BIA"): 
+        return DEST_DIR+"CAS0OPSRAP_"+str(year)+str_doy+"0000_01D_01D_DCB.BIA"
     
     #print (DEST_DIR)
 
@@ -212,7 +219,7 @@ def get_dcb_from_cddis(year,doy,DEST_DIR_BASE):
         if not href:
             continue
     
-        if ("CAS0MGXRAP_"+str(year)+str(doy) not in href) and ("CAS0OPSRAP_"+str(year)+str(doy) not in href):
+        if ("CAS0MGXRAP_"+str(year)+str_doy not in href) and ("CAS0OPSRAP_"+str(year)+str_doy not in href):
             continue
         #print (href)
     
