@@ -2,7 +2,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import math
-import seaborn as sns
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.dates as mdates
@@ -32,10 +31,6 @@ def plot_tracks(df,dest_folder='',lat_station=None,lon_station=None,station=''):
 
 
     # Generate a color palette with sufficient contrast for each 'sv'
-    # Using sns.hls_palette directly to control saturation (s) and lightness (l)
-    #colors = sns.hls_palette(num_svs, l=.5, s=.9)
-    #sv_to_color = {sv: colors[i] for i, sv in enumerate(unique_svs)}
-
     colors = contrast_palette(num_svs)
     sv_to_color = {sv: colors[i] for i, sv in enumerate(unique_svs)}
 
