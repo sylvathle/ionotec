@@ -221,6 +221,7 @@ class tec_station:
             
             self.station = header["name_station"].replace(" ","").lower()
             self.coord = header['position']
+            print (f_obs)
             list_df_f_obs = rfile.read_data()
 
             for const, df in list_df_f_obs.items():
@@ -1211,7 +1212,6 @@ class tec_station:
 
         self.estimate_dcb()
         #print (self.list_df['S'])
-
 
         if len(self.df_obs)>0:
             if store:

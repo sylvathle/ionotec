@@ -13,7 +13,7 @@ def filter_outsider_tracks(df,intervals_not_filtered):
 
     threshold = 15
     
-    df_out = df.copy()
+    df_out = df
     mask_intervals = pd.Series(False, index=df_out.index)
     for interval in intervals_not_filtered:
         mask_intervals = mask_intervals | ((df_out.index>=interval[0]) & (df_out.index<interval[1]))

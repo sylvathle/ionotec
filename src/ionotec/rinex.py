@@ -67,7 +67,10 @@ def process_head_data_line_rinexv2(line):
     millisecond = int(line[19:22])
     d = datetime.datetime(year,month,day,hour,minute,second,millisecond)
 
+
+
     nsat = int(line[30:32])
+
 
     ### Get Satellites list
     istr = 0
@@ -76,6 +79,7 @@ def process_head_data_line_rinexv2(line):
     while istr<len(str_sats):
         list_sats.append(str_sats[istr:istr+3])
         istr=istr+3
+
 
     return d,nsat,list_sats
 
@@ -331,6 +335,11 @@ class rinex:
         ### First datatime
         data_head_line = self.line    
         d,nsat,list_sats = process_head_data_line(data_head_line)
+        while len(list_sats)-1!=nsat:
+            self.line = self.file.readline()
+            if not self.line: return {}
+            if len(self.line)>0 and self.line[0]=='>':
+                d,nsat,list_sats = process_head_data_line(self.line)
 
         
         last_item = {}

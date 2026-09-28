@@ -98,7 +98,7 @@ def get_rinex_from_cddis(year,doy,suff,DEST_DIR_BASE,list_stations=None,nfirst=-
             
     #print(f"Found {len(links)} files")
     if len(links)==0: 
-        print ("No file for ",station)
+        print ("No file for ",station, doy, year)
         return []
     #headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:39.0)'}
     if nfirst==-1: nfirst =len(links)
