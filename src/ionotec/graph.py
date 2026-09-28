@@ -104,7 +104,7 @@ def plot_tracks(df,dest_folder='',lat_station=None,lon_station=None,station=''):
 
 
 
-    plt.savefig(dest_folder+'/simple_'+station+'_'+str_d1+'_'+str_d2+'.png',bbox_inches='tight')
+    plt.savefig(dest_folder+'/simple_'+station+'.png',bbox_inches='tight')
     plt.close()
 
 
@@ -242,5 +242,5 @@ def plot_tracks_individuals(df,dest_folder='',station=''):
             row_idx += 1
     
     plt.tight_layout() # Adjust layout to prevent overlaps
-    plt.savefig(dest_folder+'/full_'+station+'_'+str_d1+'_'+str_d2+'.png',bbox_inches='tight')
+    plt.savefig(dest_folder+'/full_'+station+'.png',bbox_inches='tight')
     plt.close()
