@@ -134,7 +134,7 @@ def _fetch_curl(url, dest=None, max_attempts=6):
 
     cmd = [
         "curl", "-sS", "-n", "-L",
-        "-c", str(_cookie_file()), "-b", str(_cookie_file()),
+        "-b", "",
         "-o", str(out), "-w", "%{http_code}", url,
     ]
 
@@ -173,7 +173,7 @@ def _fetch_curl(url, dest=None, max_attempts=6):
             if attempt == max_attempts - 1:
                 raise ConnectionError(f"curl: {msg}")
 
-            wait = 2 * (attempt + 1)
+            wait = 10 * (attempt + 1)
             print(f"WARNING {url}: {msg} -> retry in {wait} s")
             time.sleep(wait)
 
@@ -335,36 +335,54 @@ def stations_available_igs(start, end, full_id=False,
 
 
 def _plan(station, days, listings):
-    """[(day, file name)] to download for one station."""
+    """
+    [(day, file name, fallback file name or None)] to download for one
+    station: ONE file per day.
+
+    Long names (SSSS00CCC_R_..._MO.crx.gz, RINEX 3/4 naming) are preferred;
+    the RINEX 2 short name (ssssDDD0.YYd.gz) is only used when the day has
+    no long-name file.
+    """
     tasks = []
 
     for d in days:
 
+        doy = d.timetuple().tm_yday
+
         if len(station) == 9:
-            # SSSS00CCC_R_YYYYDDD0000_01D_30S_MO.crx.gz
-            tasks.append((
-                d,
-                f"{station.upper()}_R_{d.year}"
-                f"{d.timetuple().tm_yday:03d}0000_01D_30S_MO.crx.gz",
-            ))
+            # No listing needed: build the long name; if it does not
+            # exist, the RINEX 2 file is the fallback.
+            long_name = (
+                f"{station.upper()}_R_{d.year}{doy:03d}0000_01D_30S_MO.crx.gz"
+            )
+            short_name = f"{station[:4]}{doy:03d}0.{d.year % 100:02d}d.gz"
+            tasks.append((d, long_name, short_name))
             continue
 
-        found = False
+        long_names, short_names = [], []
 
         for fname in listings.get(d) or []:
-            if _station_ids(fname)[1] == station:
-                tasks.append((d, fname))
-                found = True
+            full, site = _station_ids(fname)
 
-        if not found:
-            print(f"NONE  {station} on {d} "
-                  f"(DOY {d.timetuple().tm_yday:03d})")
+            if site != station:
+                continue
+
+            (long_names if full else short_names).append(fname)
+
+        if long_names:
+            tasks.append((d, sorted(long_names)[0], None))
+        elif short_names:
+            tasks.append((d, sorted(short_names)[0], None))
+        else:
+            print(f"NONE  {station} on {d} (DOY {doy:03d})")
 
     return tasks
 
 
-def _download_one(d, fname, output_dir):
-    """Download + extract one file. Returns the Path, or None."""
+def _download_one(d, fname, output_dir, fallback=None):
+    """Download + extract one file. Returns the Path, or None.
+    If the file does not exist on the server (404) and `fallback` is given,
+    that file is downloaded instead."""
     gz_path = output_dir / fname
     rinex_path = gz_path.with_suffix("")
 
@@ -381,6 +399,10 @@ def _download_one(d, fname, output_dir):
 
         if ok is None:
             print(f"NONE  {fname}")
+
+            if fallback is not None:
+                return _download_one(d, fallback, output_dir)
+
             return None
 
         return extract_and_remove_gz(gz_path)
@@ -420,17 +442,17 @@ def download_igs_stations(stations, start, end, output_dir=".",
     if any(len(s) == 4 for s in stations):
         listings = _list_days(days, workers)
 
-    tasks = []                      # (station, day, fname)
+    tasks = []                      # (station, day, fname, fallback)
     for st in stations:
-        tasks += [(st, d, f) for d, f in _plan(st, days, listings)]
+        tasks += [(st, d, f, fb) for d, f, fb in _plan(st, days, listings)]
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
         results = list(ex.map(
-            lambda t: _download_one(t[1], t[2], output_dir), tasks
+            lambda t: _download_one(t[1], t[2], output_dir, t[3]), tasks
         ))
 
     out = {st: [] for st in stations}
-    for (st, _, _), path in zip(tasks, results):
+    for (st, _, _, _), path in zip(tasks, results):
         if path is not None:
             out[st].append(path)
 
@@ -452,6 +474,10 @@ def download_igs(station, start, end, output_dir=".",
     With a 9-character id the file URL is built directly (no directory
     listing); with a 4-character name the daily listing is read (cached).
     Days are downloaded in parallel (`workers` connections).
+
+    One file per station and day: the long-name file (RINEX 3/4 naming,
+    SSSS00CCC_R_..._MO.crx.gz) when it exists, the RINEX 2 file
+    (ssssDDD0.YYd.gz) only if it does not.
 
     The downloaded .gz files are extracted using extract_and_remove_gz().
 
