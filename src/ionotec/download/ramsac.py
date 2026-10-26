@@ -1,14 +1,18 @@
 from pathlib import Path
 from datetime import timedelta
 
+import ssl
+import json
 import time
+import datetime as _dt
 import subprocess
 import requests
 
 # RAMSAC (IGN Argentina) daily RINEX 2 Hatanaka files, Unix-compressed (.Z):
 #   https://ramsac.ign.gob.ar/api/v1/rinex/download/5/fosa0010.24d.Z
 # The server does not send its intermediate certificate (Let's Encrypt YR1),
-# so requests needs a CA bundle that includes it. Build it once, e.g.:
+# so requests needs a CA bundle that includes it. It is built automatically
+# on the first TLS error (build_ca_bundle). By hand it would be:
 #   curl -sS -o yr1.der http://yr1.i.lencr.org/
 #   openssl x509 -inform DER -in yr1.der -out yr1.pem
 #   cat /etc/ssl/certs/ca-certificates.crt yr1.pem > ~/.cache/ionotec/ramsac-bundle.pem
@@ -36,6 +40,111 @@ TOLH TOSF TRN1 TUC1 TUCU UCOR UNPA UNRO UNSA UNSJ UYBU UYCO UYPA UYSA UYSO UYTD
 VBCA VCON VCOP VDMA VIMA VIME VIRA VLAN YCBA YEMA ZPLA
 """.split()]
 
+# Last file published by each station that is no longer current, from the
+# RAMSAC status page (snapshot of 2026-10-22). A station cannot have a file
+# after its last one, so later days are not even requested. Stations that
+# are current when the snapshot was taken are not listed (never skipped).
+# Set USE_LAST_FILE_SKIP = False to ignore this table.
+USE_LAST_FILE_SKIP = True
+LAST_FILE = {k: _dt.date.fromisoformat(v) for k, v in {
+    "alta": "2025-10-09", "borc": "2025-03-18", "coyq": "2020-01-26",
+    "csom": "2026-09-08", "eby1": "2026-06-28", "ecar": "2025-09-11",
+    "grls": "2026-08-03", "meco": "2024-01-22", "prcv": "2024-09-09",
+    "rdcm": "2026-07-18", "rsal": "2025-11-29", "sprz": "2026-02-10",
+    "vcop": "2025-09-17", "vira": "2023-02-25", "vlan": "2025-06-09",
+    "ycba": "2025-12-12",
+}.items()}
+
+# Results of the existence checks are kept on disk, so a station-day is
+# never requested twice (None -> no disk cache). "Found" is kept forever;
+# "not found" only for days older than NEGATIVE_CACHE_AFTER_DAYS, because
+# recent files may still be published.
+CACHE_FILE = Path.home() / ".cache" / "ionotec" / "ramsac_exists.json"
+NEGATIVE_CACHE_AFTER_DAYS = 7
+_CACHE = None
+
+
+_BUNDLE_TRIED = False
+
+
+def build_ca_bundle(path=None, host="ramsac.ign.gob.ar"):
+    """
+    Build a CA bundle that works for RAMSAC: the usual trusted roots
+    (certifi) plus the intermediate certificate(s) the server forgets to
+    send. They are found by following the "CA Issuers" links of the
+    server's certificate (Let's Encrypt YR1 -> its issuer -> ...).
+    Needs the `cryptography` package (installed with paramiko).
+    """
+    import certifi
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.x509.oid import AuthorityInformationAccessOID, ExtensionOID
+
+    path = Path(path or CA_BUNDLE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Only reads the server's own certificate (no verification needed).
+    leaf_pem = ssl.get_server_certificate((host, 443))
+    cert = x509.load_pem_x509_certificate(leaf_pem.encode())
+
+    extra = []
+
+    for _ in range(5):
+
+        if cert.subject == cert.issuer:          # self-signed root reached
+            break
+
+        try:
+            aia = cert.extensions.get_extension_for_oid(
+                ExtensionOID.AUTHORITY_INFORMATION_ACCESS
+            ).value
+        except x509.ExtensionNotFound:
+            break
+
+        urls = [
+            d.access_location.value for d in aia
+            if d.access_method == AuthorityInformationAccessOID.CA_ISSUERS
+        ]
+
+        if not urls:
+            break
+
+        data = requests.get(urls[0], timeout=30).content
+
+        try:
+            cert = x509.load_der_x509_certificate(data)
+        except ValueError:
+            cert = x509.load_pem_x509_certificate(data)
+
+        extra.append(cert.public_bytes(serialization.Encoding.PEM))
+
+    path.write_bytes(
+        Path(certifi.where()).read_bytes() + b"\n" + b"\n".join(extra)
+    )
+
+    return path
+
+
+def _ensure_bundle(session):
+    """Build the CA bundle once per process; True if the caller should retry."""
+    global _BUNDLE_TRIED
+
+    if _BUNDLE_TRIED or CA_BUNDLE is None:
+        return False
+
+    _BUNDLE_TRIED = True
+
+    try:
+        print("INFO  building the CA bundle for ramsac.ign.gob.ar ...")
+        build_ca_bundle()
+
+    except Exception as e:
+        print(f"WARNING could not build the CA bundle: {e}")
+        return False
+
+    session.verify = str(CA_BUNDLE)
+    return True
+
 
 def _new_session():
     s = requests.Session()
@@ -55,10 +164,13 @@ def _call(session, method, url, max_retries=4, **kwargs):
             return session.request(method, url, timeout=(10, 120), **kwargs)
 
         except requests.exceptions.SSLError as e:
+            if _ensure_bundle(session):
+                continue                      # retry with the new bundle
+
             raise RuntimeError(
                 "TLS certificate error: ramsac.ign.gob.ar does not send its "
                 "intermediate certificate. Build the CA bundle described at "
-                f"the top of argentina.py (expected at {CA_BUNDLE}). {e}"
+                f"the top of ramsac.py (expected at {CA_BUNDLE}). {e}"
             )
 
         except (
@@ -72,6 +184,69 @@ def _call(session, method, url, max_retries=4, **kwargs):
             wait = 2 * (attempt + 1)
             print(f"WARNING {url}: {e} -> retry in {wait} s")
             time.sleep(wait)
+
+
+def _load_cache():
+    global _CACHE
+
+    if _CACHE is None:
+        _CACHE = {}
+
+        if CACHE_FILE is not None and Path(CACHE_FILE).exists():
+            try:
+                _CACHE = json.loads(Path(CACHE_FILE).read_text())
+            except Exception:
+                _CACHE = {}
+
+    return _CACHE
+
+
+def _save_cache():
+    if CACHE_FILE is None or _CACHE is None:
+        return
+
+    path = Path(CACHE_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(_CACHE))
+    tmp.replace(path)
+
+
+def _remember(station, d, found):
+    """Store an existence result (negative ones only for old days)."""
+    day = d.date() if hasattr(d, "date") else d
+
+    if not found:
+        limit = _dt.date.today() - _dt.timedelta(days=NEGATIVE_CACHE_AFTER_DAYS)
+
+        if day > limit:
+            return
+
+    _load_cache()[f"{station}:{day:%Y%j}"] = bool(found)
+
+
+def _exists_cached(session, station, d):
+    """_exists() with the disk cache; returns True / False."""
+    day = d.date() if hasattr(d, "date") else d
+    key = f"{station}:{day:%Y%j}"
+
+    cache = _load_cache()
+
+    if key in cache:
+        return cache[key]
+
+    found = _exists(session, station, d) is not None
+    _remember(station, d, found)
+
+    return found
+
+
+def _after_last_file(station, d):
+    day = d.date() if hasattr(d, "date") else d
+    last = LAST_FILE.get(station)
+
+    return USE_LAST_FILE_SKIP and last is not None and day > last
 
 
 def _exists(session, station, d):
@@ -122,16 +297,19 @@ def _uncompress(z_path):
     raise RuntimeError("neither gzip nor uncompress was found in the PATH")
 
 
-def stations_available_argentina(start, end, stations=None):
+def stations_available_ramsac(start, end, stations=None):
     """
     Return the union of RAMSAC stations having a daily RINEX file during
     the requested period (4-character lower-case names, like the other
     sources).
 
     There is no listing endpoint that I know of, so every candidate station
-    is checked for every day with a HEAD request (no download). With the
-    ~140 stations of the network that is ~140 requests per day: pass
-    `stations=[...]` to restrict the candidates.
+    is checked for every day with a HEAD request (no download), except:
+      - stations already found are not checked again on later days;
+      - days after a station's last published file (LAST_FILE) are skipped;
+      - results are cached on disk (CACHE_FILE), so a station-day is never
+        requested twice, even across runs.
+    Pass `stations=[...]` to restrict the candidates.
 
     Archive:
         https://ramsac.ign.gob.ar/api/v1/rinex/download/5/ssssDDD0.YYd.Z
@@ -141,33 +319,49 @@ def stations_available_argentina(start, end, stations=None):
 
     list_stations = set()
 
-    with _new_session() as session:
+    n_new = 0
 
-        d = start
+    try:
+        with _new_session() as session:
 
-        while d <= end:
+            d = start
 
-            for st in candidates:
+            while d <= end:
 
-                if st in list_stations:
-                    continue
+                for st in candidates:
 
-                try:
-                    if _exists(session, st, d) is not None:
-                        list_stations.add(st)
+                    if st in list_stations or _after_last_file(st, d):
+                        continue
 
-                except RuntimeError:
-                    raise
+                    day = d.date() if hasattr(d, "date") else d
+                    was_cached = f"{st}:{day:%Y%j}" in _load_cache()
 
-                except Exception as e:
-                    print(f"ERROR {st} {d}: {e}")
+                    try:
+                        if _exists_cached(session, st, d):
+                            list_stations.add(st)
 
-            d += timedelta(days=1)
+                    except RuntimeError:
+                        raise
+
+                    except Exception as e:
+                        print(f"ERROR {st} {d}: {e}")
+                        continue
+
+                    if not was_cached:
+                        n_new += 1
+
+                        if n_new % 100 == 0:
+                            _save_cache()           # survive interruptions
+
+                d += timedelta(days=1)
+
+    finally:
+        _save_cache()
 
     return sorted(list_stations)
 
 
-def download_argentina(station, start, end, output_dir="."):
+def download_ramsac(station, start, end, output_dir="."):
     """
     Download RAMSAC (IGN Argentina) daily RINEX 2 Hatanaka files.
 
@@ -241,10 +435,12 @@ def download_argentina(station, start, end, output_dir="."):
                                     f.write(chunk)
 
                     list_files.append(_uncompress(z_path))
+                    _remember(station, d, True)
                     done = True
                     break
 
                 if not done:
+                    _remember(station, d, False)
                     print(f"NONE  {station} on {d} (DOY {doy:03d})")
 
             except RuntimeError:
@@ -258,6 +454,8 @@ def download_argentina(station, start, end, output_dir="."):
                 print(f"ERROR {fname}: {e}")
 
             d += timedelta(days=1)
+
+    _save_cache()
 
     print()
     print(f"Files available locally: {len(list_files)}")

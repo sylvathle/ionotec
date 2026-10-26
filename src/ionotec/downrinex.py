@@ -8,7 +8,7 @@ from ionotec.download import igs
 from ionotec.download import garner
 from ionotec.download import earthscope
 from ionotec.download import australia
-from ionotec.download import argentina
+from ionotec.download import ramsac
 
 
 from pathlib import Path
@@ -200,19 +200,19 @@ class downrinex:
                 print("WARNING sugar unavailable, skipped (see sources_errors.log)")
 
         #### ARGENTINA: RINEX 2
-        if source in ['all','argentina']:
+        if source in ['all','ramsac']:
             try:
-                available_stations = argentina.stations_available_argentina(self.date_start, self.date_end)
+                available_stations = ramsac.stations_available_ramsac(self.date_start, self.date_end)
                 for station in available_stations:
                     if station in self.list_stations: continue
-                    self.dict_station_source[station]='argentina'
+                    self.dict_station_source[station]='ramsac'
                     self.list_stations.append(station)
             except Exception:
                 logging.exception(
-                    "argentina: stations_available_argentina failed (%s - %s)",
+                    "ramsac: stations_available_ramsac failed (%s - %s)",
                     self.date_start, self.date_end,
                 )
-                print("WARNING argentina unavailable, skipped (see sources_errors.log)")
+                print("WARNING ramsac unavailable, skipped (see sources_errors.log)")
 
 
         df = pd.DataFrame(self.dict_station_source.items(), columns=['station', 'source'])
@@ -242,6 +242,8 @@ class downrinex:
             return earthscope.download_earthscope(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
         if source  == 'australia':
             return australia.download_australia(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
+        if source  == 'ramsac':
+            return ramsac.download_ramsac(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
 
 
 
