@@ -998,58 +998,66 @@ class tec_station:
 
             df_filtered = pd.DataFrame()
 
-            list_sv = df_data["sv"].unique().tolist()
-            
-            #df_sats_corrected = pd.DataFrame()
+            allowed = {(ch["C1"], ch["C2"]) for ch in self.channels[const]}
+            list_df_arcs_concat = []
 
+            for (sat, c1, c2), df_sat_chanel in df_data.groupby(["sv","C1","C2"], sort=False, observed=True):
+
+                if (c1, c2) not in allowed: continue
+                if not df_sat_chanel["STEC_l"].notna().any(): continue
+
+                # Make list of arcs of satellite using elevation information
+                list_arcs = gnss.get_arcs(df_sat_chanel["elevation"], t_begin, t_end)
+
+                # Squared of sin of elevation for baseline (Brs) pondering
+                df_sat_chanel = df_sat_chanel.assign(sin2_ele=np.sin(df_sat_chanel["elevation"])**2)
+
+                for arc in list_arcs:
+                    # Extract data from satellite arc
+                    date_filter = (df_sat_chanel.index >= arc["start"]) & (df_sat_chanel.index <= arc["end"])
+                    df_arc = df_sat_chanel[date_filter]
+                    if len(df_arc) <= 8: continue
+                    df_arc = df_arc.dropna(subset=['STEC_l'])
+                    list_df_arcs_concat.append(reco.correct_signal(df_arc))
+
+            self.list_df[const] = pd.concat(list_df_arcs_concat) if list_df_arcs_concat else pd.DataFrame()
+
+            '''
+            list_sv = df_data["sv"].unique().tolist()
+            #df_sats_corrected = pd.DataFrame()
             list_df_arcs_concat = []
 
             for sat in list_sv:
             
                 df_sat = df_data[df_data["sv"]==sat]
                 #df_sat_filter = pd.DataFrame()
-                
                 #df_sat_corrected = pd.DataFrame()
-
-
                 for channel in self.channels[const]:
 
                     chan_filter = (df_sat["C1"]==channel["C1"]) & (df_sat["C2"]==channel["C2"])
                     df_sat_chanel = df_sat[chan_filter]
-                        
                     if len(df_sat_chanel["STEC_l"].dropna())==0: continue
-
                     # Make list of arcs of satellite using elevation information
                     elevations = df_sat_chanel["elevation"]
                     list_arcs = gnss.get_arcs(elevations,t_begin,t_end)
-
                     # Squared of sin of elevation for baseline (Brs) pondering
                     df_sat_chanel["sin2_ele"] = np.sin(df_sat_chanel['elevation'])**2                    
-
                     n_arc=0
 
-                    
                     for iarc, arc in enumerate(list_arcs):
-
                         # Extract data from satellite arc
                         date_filter = (df_sat_chanel.index>=arc["start"]) & (df_sat_chanel.index<=arc["end"])
                         df_arc = df_sat_chanel[date_filter]
-
                         if len(df_arc)<=8:continue      
-                                     
                         df_arc.dropna(subset=['STEC_l'],inplace=True)
-
                         df_arc = reco.correct_signal(df_arc)
-
                         list_df_arcs_concat.append(df_arc)
-
                         #df_sats_corrected = pd.concat([df_sats_corrected,df_arc])    
-
-        
                     #if len(df_sats_corrected)==0: continue
 
             #self.list_df[const] = df_sats_corrected
             self.list_df[const] = pd.concat(list_df_arcs_concat)
+            '''
             del list_df_arcs_concat
 
             if len(self.list_df[const])==0: 
