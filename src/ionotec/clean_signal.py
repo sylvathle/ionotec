@@ -78,6 +78,7 @@ def filter_outsider_tracks(df,intervals_not_filtered=[]):
         
         df_metrics = pd.DataFrame(dict_metrics)
         if len(df_metrics)==0: break
+
         df_metrics.sort_values('av_diff',inplace=True,ascending=False)
         
         list_t_intervals_affected = []

@@ -60,6 +60,7 @@ from . import freq
 from . import DCB
 from . import gnss
 from . import reconstruction as reco
+from . import downrinex
 
 
 import warnings
@@ -73,170 +74,85 @@ import warnings
 R_E = 6371000
 
 
+
 class tec:
 
-    def __init__(self,datemin,datemax):
+    def __init__(self,datemin,datemax,list_rinex_obs=None,station_remote=None, h = 350000):
+        
 
-        #Resolution that will be used for the process (should by 60 seconds)
-        #self.resolution = 60
-        self.h = 350000
+        self.station = ""
+
+        self.read_remote=False
+        if list_rinex_obs!=None:
+            print ('Process local files')
+            self.list_f_obs = list_rinex_obs
+        elif station_remote!=None:
+            print ('Process remote files from station:',station_remote)
+            self.station = station_remote
+            self.read_remote=True
+        else: 
+            print ('Warning: Not observation source provided, nothing to process')
+
+
+        self.C1, self.C2, self.L1, self.L2, self.S1, self.S2 = "", "", "", "", "", ""
+
+        self.channels = {}
+        self.list_df = {}
+
+        self.h = h
+        self.df_br = pd.DataFrame()
+
+        self.datemin = datemin
+        self.datemax = datemax
+
+        self.coordinates = []
+
         self.rDCB_interval = timedelta(days=3)
 
-        self.list_obs_stations = {}
-        self.list_tec_stations = {}
-        self.list_station_df_obs = {}
-
-
         self.gnss = gnss.gnss(datemin=datemin,datemax=datemax)
+
+        #self.gnss = nav
 
     def set_root_dir(self,root_dir):
         st.root_dir = root_dir
         Path(st.root_dir).mkdir(parents=True, exist_ok=True)
+        
 
-    def set_rDCB_interval(self,rdcb_interval): self.rDCB_interval = rdcb_interval
-
-    def set_h(self,h): self.h = h
-
-    def get_observation_station_list(self):
-        return self.list_obs_stations
-
-    '''
-    def load_rinex_folder(self,folder,date_min=None, date_max=None,h=350000):
+    def set_h(self,h): 
         self.h = h
-
-        self.datemin = date_min
-        self.datemax = date_max
-        self.source_data_folder = rinex_folder
-        self.prepare_files()
-
-        self.gnss = gnss.gnss(self.list_f_nav)
-
-        self.sat_dcb = DCB.load_dcb(self.list_f_dcb,datemin=self.datemin,datemax=self.datemax)
-        #
-    '''
-
-
-
-    def run(self,list_f_obs, save=False):
-        #self.h = h
-
-        #self.list_f_obs = list_f_obs 
-        
-        # List of navigation files
-        #self.list_f_nav = list_f_nav if not list_f_nav is None else []
-        
-        # File containing satellite bias
-        #self.list_f_dcb = list_f_dcb if not list_f_dcb is None else []
-        folder = st.root_dir + "TEC/"
-        Path(folder).mkdir(parents=True, exist_ok=True)
-
-        self.list_obs_stations = {}
-        self.list_tec_stations = {}
-        self.list_station_df_obs = {}
-
-
-        if not os.path.exists(st.root_dir + "TEC/"):
-            os.mkdir(st.root_dir + "TEC/")
-        
-        if not isinstance(list_f_obs,list): list_f_obs = [list_f_obs]
-        
-        for f_obs in list_f_obs:
-
-            if isinstance(f_obs,str): f_obs = Path(f_obs)
-            if not f_obs.is_file(): 
-                print (f_obs.resolve(),"doesn't exist, Skipping it")
-                continue
-            station = f_obs.name[:4].lower()
-
-            if station not in self.list_tec_stations.keys():
-                self.list_tec_stations[station] = tec_station([f_obs],nav=self.gnss)
-                #self.list_obs_stations.append(station)
-            else:
-                self.list_tec_stations[station].add_f_obs(f_obs)
-
-        Path(st.root_dir).mkdir(parents=True, exist_ok=True)
-        #print ("Output directory is :",st.root_dir)
-
-
-        for station in self.list_tec_stations.keys():
-            print ("Running tec for station: "+station)
-            self.list_station_df_obs[station] = self.list_tec_stations[station].run(self.h,self.rDCB_interval,store=save)
-            self.list_obs_stations[station] = self.list_tec_stations[station].get_coordinates()
-
-
-        return self.list_station_df_obs
-
-
-    def get_stations_coordinates(self):
-        return self.list_obs_stations
-
-
-    def get_dcb(self):
-        list_df_dcb = {}
-        for station in self.list_tec_stations.keys():
-            list_df_dcb[station] = self.list_tec_stations[station].df_br
-        return list_df_dcb
-        
-
-
-
-class tec_station:
-
-    def __init__(self,list_f_obs,nav):
-        
-        self.list_f_obs = list_f_obs
-
-        self.channels = {}
-        self.list_df = {}
-
-        self.h  = 350000
-
-        self.station = ""
-        self.datemin = None
-        self.datemax = None
-
-        self.coordinates = []
-
-
-        self.gnss = nav
-        
 
     def add_f_obs(self,f_obs):
         self.list_f_obs.append(f_obs)
 
+    def set_rDCB_interval(self,rdcb_interval): 
+        self.rDCB_interval = rdcb_interval
 
-    def load_files(self):
-        
-        self.list_df = {}
-        self.channels = {}
 
-        for f_obs in sorted(self.list_f_obs):
+    def rinex_to_stec(self,f_obs):
 
-            rfile = rx.rinex(f_obs)
-            header = rfile.read_header()
+        rfile = rx.rinex(f_obs)
+        header = rfile.read_header()
 
-            if len(self.coordinates) == 0:
-                self.coordinates = header['coord']
-                #print (header)
-                #print (self.coordinates)
-
-            ## Avoid running files that are not in the requested date range
-            #datelim_cond = (
-		    #    (self.datemin is None or header["t_first_obs"].date() >= datemin.date()) and
-		    #    (self.datemax is None or header["t_first_obs"].date() <= datemax.date())
-            #)
-            #if not datelim_cond: continue
+        if len(self.coordinates) == 0:
+            self.coordinates = header['coord']
             
-            self.station = header["name_station"].replace(" ","").lower()
-            self.coord = header['position']
-            list_df_f_obs = rfile.read_data()
+        self.station = header["name_station"].replace(" ","").lower()
+        self.coord = header['position']
+        list_df_f_obs = rfile.read_data()
 
 
-            list_df_concat = []
 
-            for const, df in list_df_f_obs.items():
-                df.set_index('time',inplace=True)
-                if (len(df)==0): continue
+
+        list_df_concat = []
+
+        for const, df in list_df_f_obs.items():
+            df.set_index('time',inplace=True)
+            list_sv = df['sv'].unique().tolist()
+            for sv in list_sv:
+                df_sv = df[df['sv']==sv]
+                #print (sv)
+                #print (df_sv)
+            if (len(df)==0): continue
 
                 #### HERE SHOULD BE COMPUTED STEC
                 # 1 detect the chanel
@@ -244,12 +160,42 @@ class tec_station:
                 # 3 compute STEC
                 #print (const)
                 #if const!='J': continue
-                df = self.compute_stec(const,df)
+            df = self.compute_stec(const,df)
+            #print ('rinex_to_stec')
+            #print (df)
+            if len(df)==0: continue
+            if const in self.list_df.keys():
+                self.list_df[const] = pd.concat([self.list_df[const],df])
+            else:
+                self.list_df[const] = df
+            #print (const)
+            #print (self.list_df[const])
 
-                if const in self.list_df.keys():
-                    self.list_df[const] = pd.concat([self.list_df[const],df])
-                else:
-                    self.list_df[const] = df
+
+    def load_files(self):
+        
+        self.list_df = {}
+        self.channels = {}
+
+        #print (self.read_remote)
+        if self.read_remote:
+            d = self.datemin
+            while d<self.datemax:
+                source = downrinex.getSource(self.station)
+                f_obs = downrinex.download_rinex(self.station, d, output_dir='/tmp/down_rinex/')
+                #print (d)
+                #print (f_obs)
+                if (f_obs is None): 
+                    d+=timedelta(days=1)
+                    continue
+                self.rinex_to_stec(f_obs)
+                Path(f_obs).unlink()
+                d+=timedelta(days=1)
+        else:
+            for f_obs in sorted(self.list_f_obs):
+                self.rinex_to_stec(f_obs)
+
+
         #sys.exit()
 
 
@@ -282,173 +228,182 @@ class tec_station:
 
 
     def get_channels(self,constellation,df_rinex):
-
         list_cols = df_rinex.columns
         list_chan=[]
 
         if constellation=='G':
 
 
+            #print (list_cols)
+            chan = {}
             if ("C1C" in list_cols) and ("C2W" in list_cols) and ("L1C" in list_cols) and ("L2W" in list_cols) and ("S1C" in list_cols) and ("S2W" in list_cols):
-                C1,C2,L1,L2,S1,S2 = "C1C","C2W","L1C","L2W","S1C","S2W"
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
+                self.C1,self.C2,self.L1,self.L2,self.S1,self.S2 = "C1C","C2W","L1C","L2W","S1C","S2W"
+                chan = {"C1":self.C1,"C2":self.C2,"L1":self.L1,"L2":self.L2,"S1":self.S1,"S2":self.S2}
             elif ("C1" in list_cols) and ("P2" in list_cols) and ("L1" in list_cols) and ("L2" in list_cols) and ('S1' in list_cols) and ('S2' in list_cols):
-                C1,C2,L1,L2,S1,S2 = "C1","P2","L1","L2","S1","S2"
+                self.C1,self.C2,self.L1,self.L2,self.S1,self.S2 = "C1","P2","L1","L2","S1","S2"
+                #chan = {"C1":"C1","C2":"P2","L1":"L1","L2":"L2","S1":"S1","S2":"S2"}
                 chan = {"C1":"C1W","C2":"C2W","L1":"L1","L2":"L2","S1":"S1","S2":"S2"}
             elif ("P1" in list_cols) and ("P2" in list_cols) and ("L1" in list_cols) and ("L2" in list_cols) and ('S1' in list_cols) and ('S2' in list_cols):
-                C1,C2,L1,L2,S1,S2 = "P1","P2","L1","L2","S1","S2"
+                self.C1, self.C2, self.L1, self.L2, self.S1, self.S2 = "P1","P2","L1","L2","S1","S2"
+                #chan = {"C1":"P1","C2":"P2","L1":"L1","L2":"L2","S1":"S1","S2":"S2"}
                 chan = {"C1":"C1W","C2":"C2W","L1":"L1","L2":"L2","S1":"S1","S2":"S2"}
+            else: return []
 
-            if chan: list_chan.append(chan)
+
+            if chan: 
+                #print ('Adding chan to G', chan)
+                list_chan.append(chan)
                 #if constellation not in self.channels.keys(): self.channels[constellation] = []
 
 
 
         elif constellation == 'R':
+            chan = {}
             if ("C1P" in list_cols) and ("C2P" in list_cols) and ("L1P" in list_cols) and ("L2P" in list_cols) and ("S1P" in list_cols) and ("S2P" in list_cols):
-                C1,C2,L1,L2,S1,S2 = "C1P","C2P","L1P","L2P","S1P","S2P"
+                self.C1,self.C2,self.L1,self.L2,self.S1,self.S2 = "C1P","C2P","L1P","L2P","S1P","S2P"
                 for c in ['P','C']:
                     varc1 = 'C1'+c
                     if varc1 in list_cols:
-                        C1 = varc1
-                        S1 = 'S1'+c
+                        self.C1 = varc1
+                        self.S1 = 'S1'+c
                         break
                 for c in ['P','C']:
                     varc2 = 'C2'+c
                     if varc2 in list_cols:
-                        C2 = varc2
-                        S2 = 'S2'+c
+                        self.C2 = varc2
+                        self.S2 = 'S2'+c
                         break
                 for c in ['P','C']:
                     varc1 = 'L1'+c
                     if varc1 in list_cols:
-                        L1 = varc1
+                        self.L1 = varc1
                         break
                 for c in ['P','C']:
                     varc2 = 'L2'+c
                     if varc2 in list_cols:
-                        L2 = varc2
+                        self.L2 = varc2
                         break  
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2,"S1":S1,"S2":S2}
+                chan = {"C1":self.C1,"C2":self.C2,"L1":self.L1,"L2":self.L2,"S1":self.S1,"S2":self.S2}
             elif ("L1" in list_cols) and ("L2" in list_cols):
-                L1,L2,S1,S2 = "L1","L2","S1","S2"
-                if not (('S1' in self.list_df[const].columns) and ('S2' in self.list_df[const].columns)):
-                    chan = {}
-                else:
-                    chan = {"C1":"","C2":"","L1":L1,"L2":L2,"S1":"S1","S2":"S2"}
+                self.L1,self.L2,self.S1,self.S2 = "L1","L2","S1","S2"
+                if (('S1' in list_cols) and ('S2' in list_cols)):
+                #    chan = {}
+                #else:
+                    chan = {"C1":"","C2":"","L1":self.L1,"L2":self.L2,"S1":"S1","S2":"S2"}
                     if ("P2" in list_cols):
-                        C2="P2"
+                        self.C2="P2"
                         chan["C2"] = "C2P"
                         if ("P1" in list_cols): 
-                            C1="P1"
+                            self.C1="P1"
                             chan["C1"]="C1P"
                         elif ("C1" in list_cols): 
-                            C1="C1"
+                            self.C1="C1"
                             chan["C1"]="C1C"
                     elif ("C2" in list_cols):
-                        C2="C2"
+                        self.C2="C2"
                         chan["C2"] = "C2C"
                         if ("P1" in list_cols): 
-                            C1="P1"
+                            self.C1="P1"
                             chan["C1"]="C1P"
                         elif ("C1" in list_cols): 
-                            C1="C1"
+                            self.C1="C1"
                             chan["C1"]="C1C"
             if chan: list_chan.append(chan)
                     
         elif constellation == 'E':
-            C1, C2 = '', ''
-            L1, L2 = '', ''
-            S1, S2 = '', ''
+            #C1, C2 = '', ''
+            #L1, L2 = '', ''
+            #S1, S2 = '', ''
             for c in ['C','X','A','B','Z']:
                 varc1 = 'C1'+c
                 if varc1 in list_cols:
-                    C1 = varc1
-                    S1 = 'S1'+c
+                    self.C1 = varc1
+                    self.S1 = 'S1'+c
                     break
             for c in ['Q','X','I']:
                 varc2 = 'C5'+c
                 if varc2 in list_cols:
-                    C2 = varc2
-                    S2 = 'S5'+c
+                    self.C2 = varc2
+                    self.S2 = 'S5'+c
                     break
             for c in ['C','X','A','B','Z']:
                 varc1 = 'L1'+c
                 if varc1 in list_cols:
-                    L1 = varc1
+                    self.L1 = varc1
                     break
             for c in ['Q','X','I']:
                 varc2 = 'L5'+c
                 if varc2 in list_cols:
-                    L2 = varc2
+                    self.L2 = varc2
                     break
-            if (C1!='') and (C2!='') and (L1!='') and (L2!='') and (S1!='') and (S2!=''): 
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
-            if not ((S1 in list_cols) or (S1 in list_cols)): chan = {}
+            if (self.C1!='') and (self.C2!='') and (self.L1!='') and (self.L2!='') and (self.S1!='') and (self.S2!=''): 
+                chan = {"C1":self.C1,"C2":self.C2,"L1":self.L1,"L2":self.L2,"S1":self.S1,"S2":self.S2}
+            if not ((self.S1 in list_cols) or (self.S1 in list_cols)): chan = {}
 
             if chan: list_chan.append(chan)
 
         elif constellation == 'C':
             if ("L2I" in list_cols) and ("L7I" in list_cols) and ("C7I" in list_cols) and ("C2I" in list_cols) and ('S2I' in list_cols) and ('S7I' in list_cols):
-                C1,C2 = 'C2I','C7I'
-                L1,L2 = 'L2I','L7I'
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":'S2I',"S2":'S7I'}
+                self.C1,self.C2 = 'C2I','C7I'
+                self.L1,self.L2 = 'L2I','L7I'
+                self.S1,self.S2 = 'S2I','S7I'
+                chan = {"C1":self.C1,"C2":self.C2,"L1":self.L1,"L2":self.L2,"S1":self.S1,"S2":self.S2}
                 list_chan.append(chan)
             if ("L2I" in list_cols) and ("L6I" in list_cols) and ("C6I" in list_cols) and ("C2I" in list_cols) and ('S2I' in list_cols) and ('S6I' in list_cols):
-                C1,C2 = 'C2I','C6I'
-                L1,L2 = 'L2I','L6I'
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":'S2I',"S2":'S6I'}
+                self.C1,self.C2 = 'C2I','C6I'
+                self.L1,self.L2 = 'L2I','L6I'
+                self.S1,self.S2 = 'S2I','S6I'
+                chan = {"C1":self.C1,"C2":self.C2,"L1":self.L1,"L2":self.L2,"S1":self.S1,"S2":self.S2}
                 list_chan.append(chan)
                 
         elif constellation == 'J':
-            C1, C2, L1, L2, S1, S2 = '', '', '', '', '', ''
+            #C1, C2, L1, L2, S1, S2 = '', '', '', '', '', ''
             for c in ['C','X','S','L','Z']:
                 varc1 = 'C1'+c
                 if (varc1 in list_cols) and ('S1'+c in list_cols):
-                    C1 = varc1
-                    S1 = 'S1'+c
+                    self.C1 = varc1
+                    self.S1 = 'S1'+c
                     break
             for c in ['Q','X','I']:
                 varc2 = 'C5'+c
                 if (varc2 in list_cols) and ('S5'+c in list_cols):
-                    C2 = varc2
-                    S2 = 'S5'+c
+                    self.C2 = varc2
+                    self.S2 = 'S5'+c
                     break
             for c in ['C','X','S','L','Z']:
                 varc1 = 'L1'+c
                 if varc1 in list_cols:
-                    L1 = varc1
+                    self.L1 = varc1
                     break
             for c in ['Q','X','I']:
                 varc2 = 'L5'+c
                 if varc2 in list_cols:
-                    L2 = varc2
+                    self.L2 = varc2
                     break
-            if (C1!='') and (C2!='') and (L1!='') and (L2!='') and (S1!='') and (S2!=''): 
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
+            if (self.C1!='') and (self.C2!='') and (self.L1!='') and (self.L2!='') and (self.S1!='') and (self.S2!=''): 
+                chan = {"C1":self.C1,"C2":self.C2,"L1":self.L1,"L2":self.L2,"S1":self.S1,"S2":self.S2}
                 list_chan.append(chan)
 
         elif constellation == 'S':
 
-            C1, C2, L1, L2, S1, S2 = 'C1C', 'C5I', 'L1C', 'L5I', 'S1C', 'S5I'
-            if (C1 in list_cols) \
-                    and (C2 in list_cols)\
-                    and (L1 in list_cols)\
-                    and (L2 in list_cols)\
-                    and (S1 in list_cols)\
-                    and (S2 in list_cols):
+            self.C1, self.C2, self.L1, self.L2, self.S1, self.S2 = 'C1C', 'C5I', 'L1C', 'L5I', 'S1C', 'S5I'
+            if (self.C1 in list_cols) \
+                    and (self.C2 in list_cols)\
+                    and (self.L1 in list_cols)\
+                    and (self.L2 in list_cols)\
+                    and (self.S1 in list_cols)\
+                    and (self.S2 in list_cols):
 
-                chan = {"C1":C1,"C2":C2,"L1":L1,"L2":L2,"S1":S1,"S2":S2}
+                chan = {"C1":self.C1,"C2":self.C2,"L1":self.L1,"L2":self.L2,"S1":self.S1,"S2":self.S2}
                 list_chan.append(chan)
 
 
         return list_chan
 
     def compute_stec(self,constellation,df_rinex):
-        
         list_channels = self.get_channels(constellation,df_rinex)
 
-        if len(list_channels)==0: return False
+        if len(list_channels)==0: return pd.DataFrame()
 
         df_rinex = (df_rinex.groupby("sv")
                      .resample("1min")
@@ -458,6 +413,7 @@ class tec_station:
                      )
 
         list_df_stec_channel = []
+        #print (list_channels)
         for chan in list_channels:
 
             if constellation not in self.channels.keys():   
@@ -466,27 +422,28 @@ class tec_station:
                 self.channels[constellation].append(chan)
 
 
-            keep_cols = ['sv',chan['C1'],chan['C2'],
-                     chan['L1'],chan['L2'],
-                     chan['S1'],chan['S2']
+            keep_cols = ['sv',self.C1,self.C2,
+                     self.L1,self.L2,
+                     self.S1,self.S2
                      ]
 
             #print (keep_cols)
+            #print (df_rinex)
             df_r = df_rinex[keep_cols].copy()
 
-            df_r.dropna(subset=[chan['C1'],chan['C2'],chan['L1'],chan['L2']],inplace=True)
+            df_r.dropna(subset=[self.C1,self.C2,self.L1,self.L2],inplace=True)
 
             if constellation=='G':
-                df_r['STEC_l'] = (df_r[chan['L1']]*freq.gps_lambda1-df_r[chan['L2']]*freq.gps_lambda2)*freq.gps_alpha/1e16
-                df_r['STEC_p'] = (df_r[chan['C2']]-df_r[chan['C1']])*freq.gps_alpha/1e16
+                df_r['STEC_l'] = (df_r[self.L1]*freq.gps_lambda1-df_r[self.L2]*freq.gps_lambda2)*freq.gps_alpha/1e16
+                df_r['STEC_p'] = (df_r[self.C2]-df_r[self.C1])*freq.gps_alpha/1e16
 
             if constellation=='R':
                 list_df_glo = []
                 for sv in df_r['sv'].unique():
                     df_sat_glo  = df_r[df_r["sv"]==sv]
-                    df_sat_glo["f1"] = freq.getFrequency(sv,chan['C1'])
-                    df_sat_glo["f2"] = freq.getFrequency(sv,chan['C2'])
-                    df_sat_glo["alpha"] = freq.getAlpha(sv,chan['C1'],chan['C2'])
+                    df_sat_glo["f1"] = freq.getFrequency(sv,self.C1)
+                    df_sat_glo["f2"] = freq.getFrequency(sv,self.C2)
+                    df_sat_glo["alpha"] = freq.getAlpha(sv,self.C1,self.C2)
                     list_df_glo.append(df_sat_glo)
                 df_r = pd.concat(list_df_glo)
                 del list_df_glo
@@ -495,12 +452,12 @@ class tec_station:
                 df_r["lambda1"] = csts.c/df_r["f1"]
                 df_r["lambda2"] = csts.c/df_r["f2"]
                 
-                df_r["STEC_p"] = (df_r[chan['C2']] - df_r[chan['C1']])*df_r["alpha"]/1e16
-                df_r["STEC_l"] = (df_r["lambda1"]*df_r[chan['L1']] - df_r["lambda2"]*df_r[chan['L2']])*df_r["alpha"]/1e16
+                df_r["STEC_p"] = (df_r[self.C2] - df_r[self.C1])*df_r["alpha"]/1e16
+                df_r["STEC_l"] = (df_r["lambda1"]*df_r[self.L1] - df_r["lambda2"]*df_r[self.L2])*df_r["alpha"]/1e16
 
             if constellation=='E':
-                df_r["STEC_p"] = (df_r[chan['C2']] - df_r[chan['C1']])*freq.gps_alpha/1e16
-                df_r["STEC_l"] = (freq.gps_lambda1*df_r[chan['L1']] - freq.gps_lambda5*df_r[chan['L2']])*freq.gps_alpha/1e16
+                df_r["STEC_p"] = (df_r[self.C2] - df_r[self.C1])*freq.gps_alpha/1e16
+                df_r["STEC_l"] = (freq.gps_lambda1*df_r[self.L1] - freq.gps_lambda5*df_r[self.L2])*freq.gps_alpha/1e16
 
             if constellation=='C':
 
@@ -513,32 +470,37 @@ class tec_station:
                 bds_lambda1 = csts.c/bds_f1
                 bds_lambda2 = csts.c/bds_f2
 
-                df_r["STEC_l"] = (df_r[chan['L1']]*bds_lambda1-df_r[chan['L2']]*bds_lambda2)*beidu_alpha
-                df_r["STEC_p"] = (df_r[chan['C2']]-df_r[chan['C1']])*beidu_alpha
+                df_r["STEC_l"] = (df_r[self.L1]*bds_lambda1-df_r[self.L2]*bds_lambda2)*beidu_alpha
+                df_r["STEC_p"] = (df_r[self.C2]-df_r[self.C1])*beidu_alpha
 
             if constellation=='J':
 
                 qzss_alpha = freq.gps_f1**2*freq.gps_f5**2/(freq.gps_f1**2-freq.gps_f5**2)/40.318
-                df_r["STEC_l"] = (df_r[chan['L1']]*freq.gps_lambda1-df_r[chan['L2']]*freq.gps_lambda5)*qzss_alpha/1e16
-                df_r["STEC_p"] = (df_r[chan['C2']]-df_r[chan['C1']])*qzss_alpha/1e16
+                df_r["STEC_l"] = (df_r[self.L1]*freq.gps_lambda1-df_r[self.L2]*freq.gps_lambda5)*qzss_alpha/1e16
+                df_r["STEC_p"] = (df_r[self.C2]-df_r[self.C1])*qzss_alpha/1e16
 
             if constellation=='S':
                 sbas_alpha = freq.gps_f1**2*freq.gps_f5**2/(freq.gps_f1**2-freq.gps_f5**2)/40.318
-                df_r['STEC_l'] = (df_r[chan['L1']]*freq.gps_lambda1-df_r[chan['L2']]*freq.gps_lambda5)*sbas_alpha/1e16
-                df_r['STEC_p'] = (df_r[chan['C2']]-df_r[chan['C1']])*sbas_alpha/1e16
+                df_r['STEC_l'] = (df_r[self.L1]*freq.gps_lambda1-df_r[self.L2]*freq.gps_lambda5)*sbas_alpha/1e16
+                df_r['STEC_p'] = (df_r[self.C2]-df_r[self.C1])*sbas_alpha/1e16
 
-            df_r.drop(columns=[chan['C1'],chan['C2'],chan['L1'],chan['L2']],inplace=True)
+            df_r.drop(columns=[self.C1,self.C2,self.L1,self.L2],inplace=True)
 
             #df_r.dropna(subset=["STEC_l","STEC_p"],inplace=True)
-            df_r.rename(columns={chan['S1']:'S1', chan['S2']:'S2'},inplace=True)      
+            df_r.rename(columns={self.S1:'S1', self.S2:'S2'},inplace=True)      
                 
             df_r["C1"] = chan["C1"]
             df_r["C2"] = chan["C2"]
+            df_r = df_r.dropna()
+            #print (df_r)
+            if len(df_r)==0: continue
+
 
             list_df_stec_channel.append(df_r)
 
 
         df_rinex = pd.concat(list_df_stec_channel)
+        #print (df_rinex)
         return df_rinex
             
 
@@ -548,6 +510,7 @@ class tec_station:
 
 
 
+    """
     def rinex_to_stec(self):
         ''' Extract the relevant data for tec calculation from observation and navigation
             Compute STEC of pseudo range and code phase
@@ -950,6 +913,7 @@ class tec_station:
  
         return True
         
+    """        
         
         
 
@@ -978,9 +942,7 @@ class tec_station:
         return True
         
         
-        
     def add_baseline(self):
-    
         N_min_stec_p = 10
         signal_strength_threshold = 38
 
@@ -1455,6 +1417,12 @@ class tec_station:
         self.df_obs["STEC"] = self.df_obs["STEC"]-self.df_obs["rDCB"]
         self.df_obs["VTEC"] = self.df_obs["STEC"] * self.df_obs["cos_chi"] 
 
+    def get_dcb(self):
+        return self.df_br
+        #list_df_dcb = {}
+        #for station in self.list_tec_stations.keys():
+        #return list_df_dcb
+
 
         
     def to_feather(self):
@@ -1471,11 +1439,11 @@ class tec_station:
         df_obs.to_feather(feather_path+".feather")
     
     #def compute_vtec(self):	
-    def run(self, h, rdcb_interval ,store = True):
+    def run(self, store = False):
         #self.list_df = {}
         #self.channels = {}
-        self.h = h
-        self.rDCB_interval = rdcb_interval
+        #self.h = h
+        #self.rDCB_interval = rdcb_interval
 
         print ("Load files")
         self.load_files()
@@ -1516,7 +1484,7 @@ class tec_station:
                #self.list_df[const][["sv","lat","lon","elevation","cos_chi","STEC","VTEC"]]
             #])
 
-        #print (list_df_concat)
+        if len(list_df_concat)==0: return None
         self.df_obs = pd.concat(list_df_concat)
         del list_df_concat
 

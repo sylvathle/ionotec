@@ -27,7 +27,11 @@ def getSource(station):
     df_station_source = pd.read_csv('stations_source.csv').set_index('station')
     return df_station_source.loc[station,'source']
 
-
+def download_rinex(station, d, output_dir='.'):
+    source = getSource(station)
+    print ('source',source)
+    if source=='igs':
+        return igs.download_file(station,d,output_dir)
 
 class downrinex:
 
