@@ -67,8 +67,6 @@ from . import downrinex
 import warnings
 
 
-
-
 #pd.options.mode.chained_assignment = None
 
 # Earth Radius
@@ -139,7 +137,10 @@ class tec:
             
         self.station = header["name_station"].replace(" ","").lower()
         self.coord = header['position']
-        list_df_f_obs = rfile.read_data()
+        try: list_df_f_obs = rfile.read_data()
+        except Exception: 
+            print (f'error reading {f_obs}, ignoring it')
+            return None
 
 
 
@@ -187,6 +188,7 @@ class tec:
                     continue
                 try: self.rinex_to_stec(f_obs)
                 except Exception:
+                    print ('rinex to stec could not be run',self.station)
                     traceback.print_exc()
                 finally:
                     Path(f_obs).unlink()
