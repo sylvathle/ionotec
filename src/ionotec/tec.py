@@ -184,11 +184,12 @@ class tec:
                 source = downrinex.getSource(self.station)
                 f_obs = downrinex.download_rinex(self.station, d, output_dir='/tmp/down_rinex/')
                 if (f_obs is None): 
+                    print (f'{self.station} for day {d.strftime("%Y%m%d") could not be downloaded}')
                     d+=timedelta(days=1)
                     continue
                 try: self.rinex_to_stec(f_obs)
                 except Exception:
-                    print ('rinex to stec could not be run',self.station)
+                    print (f_obs,'rinex to stec could not be run in load_files')
                     traceback.print_exc()
                 finally:
                     Path(f_obs).unlink()
