@@ -46,6 +46,7 @@ import pymap3d as pm
 #import re
 from scipy.interpolate import interp1d
 
+import traceback
 
 #import psutil
 #import gc
@@ -84,10 +85,10 @@ class tec:
 
         self.read_remote=False
         if list_rinex_obs!=None:
-            print ('Process local files')
+            #print ('Process local files')
             self.list_f_obs = list_rinex_obs
         elif station_remote!=None:
-            print ('Process remote files from station:',station_remote)
+            #print ('Process remote files from station:',station_remote)
             self.station = station_remote
             self.read_remote=True
         else: 
@@ -150,8 +151,6 @@ class tec:
             list_sv = df['sv'].unique().tolist()
             for sv in list_sv:
                 df_sv = df[df['sv']==sv]
-                #print (sv)
-                #print (df_sv)
             if (len(df)==0): continue
 
                 #### HERE SHOULD BE COMPUTED STEC
@@ -183,13 +182,14 @@ class tec:
             while d<self.datemax:
                 source = downrinex.getSource(self.station)
                 f_obs = downrinex.download_rinex(self.station, d, output_dir='/tmp/down_rinex/')
-                #print (d)
-                #print (f_obs)
                 if (f_obs is None): 
                     d+=timedelta(days=1)
                     continue
-                self.rinex_to_stec(f_obs)
-                Path(f_obs).unlink()
+                try: self.rinex_to_stec(f_obs)
+                except Exception:
+                    traceback.print_exc()
+                finally:
+                    Path(f_obs).unlink()
                 d+=timedelta(days=1)
         else:
             for f_obs in sorted(self.list_f_obs):
@@ -234,7 +234,6 @@ class tec:
         if constellation=='G':
 
 
-            #print (list_cols)
             chan = {}
             if ("C1C" in list_cols) and ("C2W" in list_cols) and ("L1C" in list_cols) and ("L2W" in list_cols) and ("S1C" in list_cols) and ("S2W" in list_cols):
                 self.C1,self.C2,self.L1,self.L2,self.S1,self.S2 = "C1C","C2W","L1C","L2W","S1C","S2W"
@@ -251,7 +250,6 @@ class tec:
 
 
             if chan: 
-                #print ('Adding chan to G', chan)
                 list_chan.append(chan)
                 #if constellation not in self.channels.keys(): self.channels[constellation] = []
 
@@ -413,7 +411,6 @@ class tec:
                      )
 
         list_df_stec_channel = []
-        #print (list_channels)
         for chan in list_channels:
 
             if constellation not in self.channels.keys():   
@@ -427,8 +424,11 @@ class tec:
                      self.S1,self.S2
                      ]
 
-            #print (keep_cols)
-            #print (df_rinex)
+            missing_keys = False
+            for c in keep_cols[:-2]:
+                if c not in df_rinex.columns:
+                    missing_keys=True
+            if missing_keys: continue
             df_r = df_rinex[keep_cols].copy()
 
             df_r.dropna(subset=[self.C1,self.C2,self.L1,self.L2],inplace=True)
@@ -492,20 +492,17 @@ class tec:
             df_r["C1"] = chan["C1"]
             df_r["C2"] = chan["C2"]
             df_r = df_r.dropna()
-            #print (df_r)
             if len(df_r)==0: continue
 
 
             list_df_stec_channel.append(df_r)
 
-
+        if len(list_df_stec_channel)==0: return pd.DataFrame()
         df_rinex = pd.concat(list_df_stec_channel)
-        #print (df_rinex)
         return df_rinex
             
 
     def get_coordinates(self):
-        #print ('getcoordinates',self.coordinates)
         return self.coordinates
 
 
@@ -932,8 +929,6 @@ class tec:
             self.list_df[const] = self.gnss.getPiercingPoint(self.list_df[const],self.coord,self.h)
             # cos(chi) to calculate VTEC from STEC
             self.list_df[const]['cos_chi'] = np.cos(np.arcsin(R_E*np.cos(self.list_df[const]["elevation"])/(R_E+self.h)))   
-            #print (const)
-            #print (self.list_df[const].columns)
             self.list_df[const] = self.list_df[const][["sv","C1","C2","elevation","cos_chi","lat","lon","alt","S1","S2","STEC_l","STEC_p"]]
                         
         for const in const_without_pos:
@@ -1401,7 +1396,6 @@ class tec:
 
         # Put result back
         self.df_obs["rDCB"] = obs["DCB"]
-        #print (self.df_obs[self.df_obs['sv']=='G01'])
 
         self.df_br.set_index('station',inplace=True)
         self.df_br.drop(columns=['t'],inplace=True)
@@ -1445,7 +1439,7 @@ class tec:
         #self.h = h
         #self.rDCB_interval = rdcb_interval
 
-        print ("Load files")
+        #print ("Load files")
         self.load_files()
 
         
@@ -1456,13 +1450,13 @@ class tec:
         #for const in self.list_df.keys():
         #    print (self.list_df[const])
         
-        print ("Add GNSS Navigation Information (IPP & Elevation)")
+        #print ("Add GNSS Navigation Information (IPP & Elevation)")
         self.add_satellite_pos()
 
         #for const in self.list_df.keys():
         #    print (self.list_df[const])
         
-        print ("Correct Slant TEC discontinuities and baseline")
+        #print ("Correct Slant TEC discontinuities and baseline")
         self.add_baseline()
 
         #for const in self.list_df.keys():
@@ -1490,9 +1484,7 @@ class tec:
 
 
         self.estimate_dcb()
-        #print (self.list_df['S'])
 
-        print ('summing up')
         if len(self.df_obs)>0:
             if store:
                 #for year in self.df_obs.index.year.unique():

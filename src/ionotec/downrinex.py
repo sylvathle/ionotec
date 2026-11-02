@@ -29,7 +29,6 @@ def getSource(station):
 
 def download_rinex(station, d, output_dir='.'):
     source = getSource(station)
-    print ('source',source)
     if source=='igs':
         return igs.download_file(station,d,output_dir)
 
