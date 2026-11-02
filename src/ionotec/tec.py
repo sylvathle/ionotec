@@ -445,6 +445,7 @@ class tec:
                     df_sat_glo["f2"] = freq.getFrequency(sv,self.C2)
                     df_sat_glo["alpha"] = freq.getAlpha(sv,self.C1,self.C2)
                     list_df_glo.append(df_sat_glo)
+                if len(list_df_glo)==0: continue  
                 df_r = pd.concat(list_df_glo)
                 del list_df_glo
 
