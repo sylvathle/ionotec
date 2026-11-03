@@ -148,6 +148,7 @@ class tec:
         list_df_concat = []
 
         for const, df in list_df_f_obs.items():
+            print (const,df.columns)
             df.set_index('time',inplace=True)
             list_sv = df['sv'].unique().tolist()
             for sv in list_sv:
@@ -428,7 +429,7 @@ class tec:
                      ]
 
             missing_keys = False
-            for c in keep_cols[:-2]:
+            for c in keep_cols:
                 if c not in df_rinex.columns:
                     missing_keys=True
             if missing_keys: continue
@@ -492,6 +493,8 @@ class tec:
 
             #df_r.dropna(subset=["STEC_l","STEC_p"],inplace=True)
             df_r.rename(columns={self.S1:'S1', self.S2:'S2'},inplace=True)      
+            self.S1 = 'S1'
+            self.S2 = 'S2'
                 
             df_r["C1"] = chan["C1"]
             df_r["C2"] = chan["C2"]
