@@ -148,7 +148,6 @@ class tec:
         list_df_concat = []
 
         for const, df in list_df_f_obs.items():
-            print (const,df.columns)
             df.set_index('time',inplace=True)
             list_sv = df['sv'].unique().tolist()
             for sv in list_sv:
