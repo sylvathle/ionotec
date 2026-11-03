@@ -35,6 +35,8 @@ def download_rinex(station, d, output_dir='.'):
         return earthscope.download_file(station,d,output_dir)
     if source=='cors':
         return cors.download_file(station,d,output_dir)
+    if source=='sugar':
+        return sugar.download_file(station,d,output_dir)
 
 class downrinex:
 
@@ -223,7 +225,7 @@ class downrinex:
 
 
         df = pd.DataFrame(self.dict_station_source.items(), columns=['station', 'source'])
-        df.to_csv('stations_source.csv')
+        df.to_csv('stations_source.csv',index=False)
 
         return self.list_stations
 

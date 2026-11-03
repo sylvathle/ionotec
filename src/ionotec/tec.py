@@ -92,7 +92,6 @@ class tec:
         else: 
             print ('Warning: Not observation source provided, nothing to process')
 
-
         self.C1, self.C2, self.L1, self.L2, self.S1, self.S2 = "", "", "", "", "", ""
 
         self.channels = {}
@@ -135,15 +134,13 @@ class tec:
         if len(self.coordinates) == 0:
             self.coordinates = header['coord']
             
-        self.station = header["name_station"].replace(" ","").lower()
+        #self.station = header["name_station"].replace(" ","").lower()
+        #print (header)
         self.coord = header['position']
         try: list_df_f_obs = rfile.read_data()
         except Exception: 
             print (f'error reading {f_obs}, ignoring it')
             return None
-
-
-
 
         list_df_concat = []
 

@@ -44,6 +44,72 @@ def stations_available_sugar(start, end):
     return sorted(list_stations)
 
 
+
+def download_file(station, date, output_dir="."):
+    """Download one daily SuGAr RINEX 2 Hatanaka observation file.
+
+    Parameters
+    ----------
+    station : str
+        Four-character SuGAr station code (case-insensitive).
+    date : datetime.date or datetime.datetime
+        Date of the daily file to download.
+    output_dir : str or pathlib.Path
+        Directory where the extracted file is saved.
+
+    Returns
+    -------
+    pathlib.Path or None
+        Path to the extracted .YYd file, or None if unavailable or if the
+        download/extraction fails.
+    """
+    station = station.lower()
+
+    if len(station) != 4:
+        raise ValueError(
+            f"SuGAr station must be a 4-character RINEX v2 code: {station}"
+        )
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    year = date.year
+    doy = date.timetuple().tm_yday
+    fname = f"{station}{doy:03d}0.{year % 100:02d}d.gz"
+    gz_path = output_dir / fname
+    output_path = gz_path.with_suffix("")
+    remote_dir = f"/SugarData/{year}/{station}/RINEX2-HATANAKA"
+
+    if output_path.exists():
+        print(f"SKIP  {output_path.name}")
+        return output_path
+
+    ftp = None
+    try:
+        ftp = FTP("ftp.earthobservatory.sg", timeout=60)
+        ftp.login()
+        ftp.cwd(remote_dir)
+
+        print(f"GET   {fname}")
+        with gz_path.open("wb") as f:
+            ftp.retrbinary(f"RETR {fname}", f.write)
+
+        output_path = extract_and_remove_gz(gz_path)
+        print(f"OK    {output_path.name}")
+        return output_path
+
+    except Exception as e:
+        gz_path.unlink(missing_ok=True)
+        print(f"NONE  {station} on {date} (DOY {doy:03d}): {e}")
+        return None
+
+    finally:
+        if ftp is not None:
+            try:
+                ftp.quit()
+            except Exception:
+                ftp.close()
+
 def download_sugar(station, start, end, output_dir="."):
 
     station = station.lower()
@@ -124,11 +190,3 @@ def download_sugar(station, start, end, output_dir="."):
                 gz_path.unlink()
 
             print(f"ERROR extracting {fname}: {e}")
-
-        d += timedelta(days=1)
-
-    ftp.quit()
-
-    #print(f"Files available locally: {len(list_files)}")
-
-    return list_files
