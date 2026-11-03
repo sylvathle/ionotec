@@ -540,8 +540,8 @@ def _final_path(gz_path):
     if p.suffix.lower() == ".rnx":
         return p.with_suffix(".crx")
 
-    if _is_r2_hatanaka(p):
-        return p.with_suffix(p.suffix[:-1] + "o")
+    #if _is_r2_hatanaka(p):
+    #    return p.with_suffix(p.suffix[:-1] + "o")
 
     return p
 
@@ -566,7 +566,7 @@ def _download_one(d, candidates, output_dir):
             return final_path
 
         try:
-            #print(f"GET   {fname}")
+            print(f"GET   {fname}")
 
             with _new_session() as session:
                 ok = _fetch(session, _day_url(d, kind) + fname, dest=gz_path)
