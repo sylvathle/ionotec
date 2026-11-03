@@ -168,7 +168,7 @@ def stations_available_geonet(start, end, full_id=False):
 
     with requests.Session() as session:
 
-        while d <= end:
+        while d < end:
 
             try:
                 files = _list_day(session, d)

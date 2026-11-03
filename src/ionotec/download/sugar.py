@@ -129,7 +129,7 @@ def download_sugar(station, start, end, output_dir="."):
 
     d = start
 
-    while d <= end:
+    while d < end:
 
         year = d.year
         doy = d.timetuple().tm_yday

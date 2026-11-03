@@ -12,7 +12,7 @@ def stations_available_ibge(start, end):
 
     d = start
 
-    while d <= end:
+    while d < end:
 
         print (d)
 

@@ -144,7 +144,7 @@ def stations_available_sonel(start, end, full_id=False):
     try:
         d = start
 
-        while d <= end:
+        while d < end:
 
             year = d.year
             doy = d.timetuple().tm_yday

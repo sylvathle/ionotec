@@ -27,7 +27,7 @@ def stations_available_cors(start, end):
 
     with requests.Session() as session:
 
-        while d <= end:
+        while d < end:
 
             year = d.year
             doy = d.timetuple().tm_yday

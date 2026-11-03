@@ -394,7 +394,7 @@ def download_ramsac(station, start, end, output_dir="."):
 
         d = start
 
-        while d <= end:
+        while d < end:
 
             doy = d.timetuple().tm_yday
             fname = _filename(station, d)

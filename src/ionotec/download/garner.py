@@ -117,7 +117,7 @@ def stations_available_garner(start, end, full_id=False):
 
     with requests.Session() as session:
 
-        while d <= end:
+        while d < end:
 
             try:
                 names = _list_day(session, d)

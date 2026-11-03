@@ -191,7 +191,7 @@ def stations_available_earthscope(start, end, full_id=False):
 
     with _new_session() as session:
 
-        while d <= end:
+        while d < end:
 
             try:
                 names = _list_day(session, d)

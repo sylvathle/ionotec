@@ -154,7 +154,7 @@ def stations_available_australia(start, end, full_id=False):
 
     with requests.Session() as session:
 
-        while d <= end:
+        while d < end:
 
             try:
                 keys = _list_keys(session, _day_prefix(d))
