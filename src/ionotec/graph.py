@@ -89,7 +89,6 @@ def plot_tracks(df,dest_folder='',lat_station=None,lon_station=None,station=''):
 #                s=18,
 #                zorder=1) # Scatter plot should be on top
 
-    print (station)
     # Plot modifications
     ax.set_xlabel('') # No xlabel as requested
     ax.set_ylabel('VTEC (TECu)', fontsize=14) # Changed ylabel and increased font size

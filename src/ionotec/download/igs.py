@@ -269,7 +269,7 @@ def _list_day(session, d, kind="d"):
 def _days(start, end):
     days = []
     d = start
-    while d <= end:
+    while d < end:
         days.append(d)
         d += timedelta(days=1)
     return days
@@ -566,7 +566,7 @@ def _download_one(d, candidates, output_dir):
             return final_path
 
         try:
-            print(f"GET   {fname}")
+            #print(f"GET   {fname}")
 
             with _new_session() as session:
                 ok = _fetch(session, _day_url(d, kind) + fname, dest=gz_path)
