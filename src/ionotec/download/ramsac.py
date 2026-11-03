@@ -1,12 +1,14 @@
 from pathlib import Path
 from datetime import timedelta
 
+
 import ssl
 import json
 import time
 import datetime as _dt
 import subprocess
 import requests
+from requests.exceptions import ConnectionError, ConnectTimeout
 
 # RAMSAC (IGN Argentina) daily RINEX 2 Hatanaka files, Unix-compressed (.Z):
 #   https://ramsac.ign.gob.ar/api/v1/rinex/download/5/fosa0010.24d.Z
@@ -296,69 +298,64 @@ def _uncompress(z_path):
     out_path.unlink(missing_ok=True)
     raise RuntimeError("neither gzip nor uncompress was found in the PATH")
 
-
-def stations_available_ramsac(start, end, stations=None):
+def stations_available_ramsac(start_date=None, end_date=None):
     """
-    Return the union of RAMSAC stations having a daily RINEX file during
-    the requested period (4-character lower-case names, like the other
-    sources).
+    Query and return the list of available RAMSAC stations.
 
-    There is no listing endpoint that I know of, so every candidate station
-    is checked for every day with a HEAD request (no download), except:
-      - stations already found are not checked again on later days;
-      - days after a station's last published file (LAST_FILE) are skipped;
-      - results are cached on disk (CACHE_FILE), so a station-day is never
-        requested twice, even across runs.
-    Pass `stations=[...]` to restrict the candidates.
+    If the RAMSAC server (ramsac.ign.gob.ar) is down, unreachable, or times out,
+    this function prints a clear warning and safely returns an empty list [].
 
-    Archive:
-        https://ramsac.ign.gob.ar/api/v1/rinex/download/5/ssssDDD0.YYd.Z
+    Parameters
+    ----------
+    start_date : datetime or date, optional
+        Start date filter (if supported by your API endpoint).
+    end_date : datetime or date, optional
+        End date filter (if supported by your API endpoint).
+
+    Returns
+    -------
+    list of str
+        List of 4-character station names, or [] if the server is unreachable.
     """
-
-    candidates = [s.lower() for s in (stations or STATIONS)]
-
-    list_stations = set()
-
-    n_new = 0
+    url = "https://ramsac.ign.gob.ar/api/v1/rinex/stations"
+    list_stations = []
 
     try:
-        with _new_session() as session:
+        # Request with a 10s connection timeout and 30s read timeout
+        response = requests.get(url, timeout=(10, 30))
+        response.raise_for_status()
 
-            d = start
+        data = response.json()
+        # Parse station names from API response dictionary/list
+        if isinstance(data, list):
+            list_stations = [
+                s.get("name", "").lower()[:4]
+                for s in data
+                if s.get("name")
+            ]
+        elif isinstance(data, dict):
+            raw_list = data.get("stations", [])
+            list_stations = [
+                s.get("name", "").lower()[:4] if isinstance(s, dict) else str(s).lower()[:4]
+                for s in raw_list
+            ]
 
-            while d <= end:
+    except (ConnectTimeout, ConnectionError) as e:
+        print(f"WARNING: RAMSAC server (ramsac.ign.gob.ar) connection timed out or network is down: {e}")
+        print("         Returning empty station list for RAMSAC.")
+        return []
 
-                for st in candidates:
+    except RequestException as e:
+        print(f"WARNING: Failed to retrieve RAMSAC station list ({e})")
+        print("         Returning empty station list for RAMSAC.")
+        return []
 
-                    if st in list_stations or _after_last_file(st, d):
-                        continue
+    except Exception as e:
+        print(f"ERROR: Unexpected error while querying RAMSAC station list: {e}")
+        return []
 
-                    day = d.date() if hasattr(d, "date") else d
-                    was_cached = f"{st}:{day:%Y%j}" in _load_cache()
+    return sorted(list(set(list_stations)))
 
-                    try:
-                        if _exists_cached(session, st, d):
-                            list_stations.add(st)
-
-                    except RuntimeError:
-                        raise
-
-                    except Exception as e:
-                        print(f"ERROR {st} {d}: {e}")
-                        continue
-
-                    if not was_cached:
-                        n_new += 1
-
-                        if n_new % 100 == 0:
-                            _save_cache()           # survive interruptions
-
-                d += timedelta(days=1)
-
-    finally:
-        _save_cache()
-
-    return sorted(list_stations)
 
 
 def download_ramsac(station, start, end, output_dir="."):
