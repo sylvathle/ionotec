@@ -98,13 +98,20 @@ def filter_outsider_tracks(df,intervals_not_filtered=[]):
     return pd.concat([df_not_filtered,df_out])
 
 def get_dcb_outsider_periods(df, threshold_std=2):
+
+    print (df)
     # Convert time columns to datetime objects if not already
     df['time_i'] = pd.to_datetime(df['time_i'])
     df['time_f'] = pd.to_datetime(df['time_f'])
 
+    print ('clean dcb 1')
+
     d_outsiders = {'station':[],'const':[],'time_i':[],'time_f':[]}
 
     for station in df['station'].unique():
+
+
+      print (station)
 
       # Filter for the given station
       station_df = df[(df['station'] == station)].copy()
