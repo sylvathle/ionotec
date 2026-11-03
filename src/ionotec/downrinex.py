@@ -37,6 +37,8 @@ def download_rinex(station, d, output_dir='.'):
         return cors.download_file(station,d,output_dir)
     if source=='sugar':
         return sugar.download_file(station,d,output_dir)
+    if source=='ibge':
+        return ibge.download_file(station,d,output_dir)
 
 class downrinex:
 
