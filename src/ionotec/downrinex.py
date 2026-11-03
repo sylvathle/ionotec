@@ -39,6 +39,18 @@ def download_rinex(station, d, output_dir='.'):
         return sugar.download_file(station,d,output_dir)
     if source=='ibge':
         return ibge.download_file(station,d,output_dir)
+    if source=='garner':
+        return garner.download_file(station,d,output_dir)
+    if source=='australia':
+        return australia.download_file(station,d,output_dir)
+    if source=='ramsac':
+        return ramsac.download_file(station,d,output_dir)
+    if source=='geonet':
+        return geonet.download_file(station,d,output_dir)
+    if source=='hongkong':
+        return hongkong.download_file(station,d,output_dir)
+    if source=='sonel':
+        return sonel.download_file(station,d,output_dir)
 
 class downrinex:
 
