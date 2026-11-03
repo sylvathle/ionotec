@@ -461,3 +461,83 @@ def download_ramsac(station, start, end, output_dir="."):
     print(f"Files available locally: {len(list_files)}")
 
     return list_files
+
+
+def download_file(station, date, output_dir="."):
+    """
+    Télécharge UN SEUL fichier d'observation RINEX 2 Hatanaka journalier pour une station RAMSAC.
+
+    Parameters
+    ----------
+    station : str
+        Nom de station à 4 caractères (insensible à la casse ; les identifiants à 9 caractères
+        sont tronqués aux 4 premiers caractères).
+    date : datetime ou date
+        La date cible pour le fichier d'observation.
+    output_dir : str ou Path, optional
+        Répertoire où le fichier sera enregistré. Par défaut, le répertoire courant.
+
+    Returns
+    -------
+    Path ou None
+        Chemin du fichier final extrait, ou None si aucun fichier n'a été trouvé ou en cas d'erreur.
+    """
+    station = station.lower()
+
+    if len(station) == 9:
+        station = station[:4]
+
+    if len(station) != 4:
+        raise ValueError("station must be a 4-character station name")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    doy = date.timetuple().tm_yday
+    fname = _filename(station, date)
+
+    z_path = output_dir / fname
+    rinex_path = z_path.with_suffix("")
+
+    # Déjà extrait localement
+    if rinex_path.exists():
+        print(f"SKIP  {rinex_path.name}")
+        return rinex_path
+
+    with _new_session() as session:
+        try:
+            for sid in IDS:
+                print(f"GET   {fname}")
+
+                r = _call(
+                    session, "GET", f"{BASE_URL}/{sid}/{fname}", stream=True
+                )
+
+                with r:
+                    if r.status_code in _NONE_CODES:
+                        continue
+
+                    r.raise_for_status()
+
+                    with open(z_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                f.write(chunk)
+
+                extracted_path = _uncompress(z_path)
+                _remember(station, date, True)
+                return extracted_path
+
+            _remember(station, date, False)
+            print(f"NONE  {station} on {date} (DOY {doy:03d})")
+            return None
+
+        except RuntimeError:
+            raise
+
+        except Exception as e:
+            z_path.unlink(missing_ok=True)
+            rinex_path.unlink(missing_ok=True)
+
+            print(f"ERROR {fname}: {e}")
+            return None

@@ -250,3 +250,93 @@ def download_garner(station, start, end, output_dir="."):
     print(f"Files available locally: {len(list_files)}")
 
     return list_files
+
+
+
+def download_file(station, date, output_dir="."):
+    """
+    Download ONE daily RINEX 3 Hatanaka observation file of a station
+    from the Garner (SOPAC/UCSD) archive.
+
+    Parameters
+    ----------
+    station : str
+        4-character site name or 9-character id (case-insensitive).
+    date : datetime or date
+        The target date for the observation file.
+    output_dir : str or Path, optional
+        Directory where the file will be saved. Default is current directory.
+
+    Returns
+    -------
+    Path or None
+        Path of the final extracted file, or None if no file was found or on error.
+    """
+    station = station.lower()
+
+    if len(station) not in (4, 9):
+        raise ValueError("station must be a 4 or 9 character name")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    doy = date.timetuple().tm_yday
+
+    with requests.Session() as session:
+        try:
+            names = _list_day(session, date)
+        except Exception as e:
+            print(f"WARNING listing {date}: {e}")
+            names = None
+
+        if names is None:
+            print(f"NONE  no directory for {date}")
+            return None
+
+        fname = None
+        for name in names:
+            full, site = _station_ids(name)
+            if (len(station) == 9 and full == station) or \
+               (len(station) == 4 and site == station):
+                fname = name
+                break
+
+    if fname is None:
+        print(f"NONE  {station} on {date} (DOY {doy:03d})")
+        return None
+
+    gz_path = output_dir / fname
+    rinex_path = gz_path.with_suffix("")
+
+    # Already extracted locally
+    if rinex_path.exists():
+        print(f"SKIP  {rinex_path.name}")
+        return rinex_path
+
+    try:
+        print(f"GET   {fname}")
+        
+        with requests.Session() as session:
+            r = _get(session, _day_url(date) + fname, stream=True)
+
+            if r is None:
+                print(f"NONE  {fname}")
+                return None
+
+            with r:
+                with open(gz_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+
+        # Extract .gz -> .crx
+        rinex_path = extract_and_remove_gz(gz_path)
+        return rinex_path
+
+    except Exception as e:
+        if gz_path.exists():
+            gz_path.unlink()
+        rinex_path.unlink(missing_ok=True)
+
+        print(f"ERROR {fname}: {e}")
+        return None

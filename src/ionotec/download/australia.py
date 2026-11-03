@@ -371,3 +371,114 @@ def download_australia(station, start, end, output_dir="."):
     print(f"Files available locally: {len(list_files)}")
 
     return list_files
+
+
+def download_file(station, date, output_dir="."):
+    """
+    Download ONE daily Geoscience Australia RINEX observation file for a station.
+
+    Parameters
+    ----------
+    station : str
+        4-character site name or 9-character id (case-insensitive).
+    date : datetime or date
+        The target date for the observation file.
+    output_dir : str or Path, optional
+        Directory where the file will be saved. Default is current directory.
+
+    Returns
+    -------
+    Path or None
+        Path of the final extracted file, or None if no file was found or on error.
+    """
+    station = station.lower()
+
+    if len(station) not in (4, 9):
+        raise ValueError("station must be a 4 or 9 character name")
+
+    site = station[:4]
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    doy = date.timetuple().tm_yday
+
+    with requests.Session() as session:
+        # List only this station's files (S3 prefixes are case-sensitive)
+        names = set()
+
+        try:
+            for case in {site.upper(), site.lower()}:
+                for key in _list_keys(session, _day_prefix(date) + case):
+                    names.add(key.split("/")[-1])
+
+        except Exception as e:
+            print(f"ERROR listing {date}: {e}")
+            return None
+
+        long_names, short_names = [], []
+
+        for name in sorted(names):
+            full, s = _station_ids(name)
+
+            if s != site:
+                continue
+
+            if _RE_LONG.match(name):
+                if len(station) == 4 or full == station:
+                    long_names.append(name)
+            else:
+                if len(station) == 4:
+                    short_names.append(name)
+
+        if not long_names and not short_names:
+            print(f"NONE  {station} on {date} (DOY {doy:03d})")
+            return None
+
+        # Check if already locally extracted (best candidate first)
+        for name in long_names + short_names:
+            p = (output_dir / name).with_suffix("")
+            if p.exists():
+                print(f"SKIP  {p.name}")
+                return p
+
+        chosen = None
+
+        # Tier 1: RINEX 4 / 3 (long names)
+        if long_names:
+            got = []
+
+            for name in long_names:
+                p = _download(session, date, name, output_dir)
+                if p is not None:
+                    got.append(p)
+
+                # A single candidate needs no version check
+                if len(long_names) == 1:
+                    break
+
+            if len(got) == 1:
+                chosen = got[0]
+
+            elif len(got) > 1:
+                # Highest version wins (ties: first in name order)
+                versions = [_rinex_version(p) or 0.0 for p in got]
+                best = max(range(len(got)), key=lambda i: versions[i])
+                chosen = got[best]
+
+                print(
+                    f"      versions {dict(zip([p.name for p in got], versions))}"
+                    f" -> keeping {chosen.name}"
+                )
+
+                for p in got:
+                    if p != chosen:
+                        p.unlink(missing_ok=True)
+
+        # Tier 2: RINEX 2
+        if chosen is None and short_names:
+            chosen = _download(session, date, short_names[0], output_dir)
+
+        if chosen is None:
+            print(f"NONE  {station} on {date} (DOY {doy:03d})")
+
+        return chosen

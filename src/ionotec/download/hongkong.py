@@ -243,3 +243,112 @@ def download_hongkong(station, start, end, output_dir="."):
     print(f"Files available locally: {len(list_files)}")
 
     return list_files
+
+
+
+def download_file(station, date, output_dir="."):
+    """
+    Télécharge UN SEUL fichier d'observation RINEX 3 Hatanaka journalier (30 s) de Hong Kong.
+
+    Parameters
+    ----------
+    station : str
+        Nom de station à 4 caractères ou identifiant à 9 caractères (insensible à la casse).
+    date : datetime ou date
+        La date cible pour le fichier d'observation.
+    output_dir : str ou Path, optional
+        Répertoire où le fichier sera enregistré. Par défaut, le répertoire courant.
+
+    Returns
+    -------
+    Path ou None
+        Chemin du fichier final extrait, ou None si aucun fichier n'a été trouvé ou en cas d'erreur.
+    """
+    station = station.lower()
+
+    if len(station) not in (4, 9):
+        raise ValueError("station must be a 4 or 9 character name")
+
+    site = station[:4]
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    year = date.year
+    doy = date.timetuple().tm_yday
+
+    remote_dir = f"{BASE_URL}/rinex3/{year}/{doy:03d}/{site}/30s/"
+
+    with requests.Session() as session:
+        try:
+            r = _get(session, remote_dir)
+        except Exception as e:
+            print(f"ERROR listing {remote_dir}: {e}")
+            return None
+
+        if r is None:
+            print(f"NONE  {station} on {date} (DOY {doy:03d})")
+            return None
+
+        with r:
+            text = r.text
+
+        # {nom_de_fichier : url}, récupéré depuis les liens de la page HTML
+        files = {}
+
+        for href in re.findall(r'HREF="([^"]+)"', text, re.IGNORECASE):
+            fname = href.split("?")[0].rstrip("/").split("/")[-1]
+
+            if _RE_OBS.match(fname):
+                files[fname] = urljoin(remote_dir, href)
+
+        for fname in _RE_FIND.findall(text):
+            files.setdefault(fname, remote_dir + fname)
+
+        # Filtrer pour ne garder que la station et la date requises
+        names = [
+            f for f in files
+            if f.lower().startswith(station)
+            and f"_{year}{doy:03d}" in f
+        ]
+
+        if not names:
+            print(f"NONE  {station} on {date} (DOY {doy:03d})")
+            return None
+
+        # On prend le premier fichier correspondant
+        fname = names[0]
+        gz_path = output_dir / fname
+        rinex_path = gz_path.with_suffix("")
+
+        # Déjà extrait localement
+        if rinex_path.exists():
+            print(f"SKIP  {rinex_path.name}")
+            return rinex_path
+
+        try:
+            print(f"GET   {fname}")
+
+            r = _get(session, files[fname], stream=True)
+
+            if r is None:
+                print(f"NONE  {fname}")
+                return None
+
+            with r:
+                with open(gz_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+
+            # Extraction du fichier .gz vers .crx
+            rinex_path = extract_and_remove_gz(gz_path)
+            return rinex_path
+
+        except Exception as e:
+            if gz_path.exists():
+                gz_path.unlink()
+            rinex_path.unlink(missing_ok=True)
+
+            print(f"ERROR {fname}: {e}")
+            return None

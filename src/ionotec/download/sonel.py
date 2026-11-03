@@ -334,3 +334,126 @@ def download_sonel(station, start, end, output_dir="."):
     print(f"Files available locally: {len(list_files)}")
 
     return list_files
+
+def _rinex_version(path):
+    """RINEX version (float) read from the header of an extracted file
+    (plain or Hatanaka), or None."""
+    try:
+        with open(path, "r", errors="replace") as f:
+            for _ in range(3):
+                line = f.readline()
+                if "RINEX VERSION / TYPE" in line:
+                    return float(line[:9])
+    except Exception:
+        pass
+    return None
+
+
+def _download(conn, remote_dir, fname, output_dir):
+    """Download + extract one file. Returns the extracted Path, or None."""
+    gz_path = output_dir / fname
+    try:
+        print(f"GET   {fname}")
+        conn.retrieve(remote_dir, fname, gz_path)
+        return extract_and_remove_gz(gz_path)
+    except Exception as e:
+        gz_path.unlink(missing_ok=True)
+        gz_path.with_suffix("").unlink(missing_ok=True)
+        print(f"ERROR {fname}: {e}")
+        return None
+
+
+def download_file(station, date, output_dir="."):
+    """
+    Download ONE daily RINEX observation file for a station from SONEL,
+    matching by the first 4 characters and prioritizing RINEX 3/4
+    (9-character station ID) over RINEX 2 if available.
+
+    Parameters
+    ----------
+    station : str
+        4-character site name (case-insensitive).
+    date : datetime or date
+        The target date for the observation file.
+    output_dir : str or Path, optional
+        Directory where the file will be saved. Default is current directory.
+
+    Returns
+    -------
+    Path or None
+        Path of the final extracted file, or None if no file was found or on error.
+    """
+    station = station.lower()
+    if len(station) != 4:
+        raise ValueError("station must be a 4-character station name")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    year = date.year
+    doy = date.timetuple().tm_yday
+    remote_dir = f"{FTP_ROOT}/{year}/{doy:03d}"
+
+    conn = _SonelFTP()
+
+    try:
+        try:
+            names = conn.list_day(year, doy)
+        except Exception as e:
+            print(f"ERROR accessing {remote_dir}: {e}")
+            return None
+
+        if names is None:
+            print(f"NONE  no directory for {date} (DOY {doy:03d})")
+            return None
+
+        r3_candidates = []
+        r2_candidates = []
+
+        for fname in names:
+            if not _is_obs_file(fname):
+                continue
+
+            full, site = _station_ids(fname)
+            if site != station:
+                continue
+
+            if full:  # RINEX 3/4 long name (9-character ID)
+                r3_candidates.append(fname)
+            else:     # RINEX 2 short name
+                r2_candidates.append(fname)
+
+        # Prioritize RINEX 3/4 first, fall back to RINEX 2 if none available
+        candidates = r3_candidates + r2_candidates
+
+        if not candidates:
+            print(f"NONE  {station} on {date} (DOY {doy:03d})")
+            return None
+
+        # Take the top priority matching file
+        fname = candidates[0]
+        gz_path = output_dir / fname
+        rinex_path = gz_path.with_suffix("")
+
+        # Already extracted locally
+        if rinex_path.exists():
+            print(f"SKIP  {rinex_path.name}")
+            return rinex_path
+
+        try:
+            print(f"GET   {fname}")
+            conn.retrieve(remote_dir, fname, gz_path)
+
+            rinex_path = extract_and_remove_gz(gz_path)
+            return rinex_path
+
+        except Exception as e:
+            if gz_path.exists():
+                gz_path.unlink()
+            rinex_path.unlink(missing_ok=True)
+
+            print(f"ERROR {fname}: {e}")
+            return None
+
+    finally:
+        conn.close()
