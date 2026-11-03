@@ -343,3 +343,125 @@ def download_earthscope(station, start, end, output_dir="."):
     print(f"Files available locally: {len(list_files)}")
 
     return list_files
+
+
+# RINEX 2 daily observation (plain), used when RINEX 4 is not available:
+#   https://data.earthscope.org/archive/gnss/data/daily/rinex2/obs/YYYY/DDD/CHNR0970.24o.gz
+BASE_URL_RINEX2 = "https://data.earthscope.org/archive/gnss/data/daily/rinex2/obs"
+
+
+def download_file(station, date, output_dir=".", rinex2_fallback=True):
+    """
+    Download ONE daily RINEX observation file of a station from EarthScope.
+
+    station : 4-character site name (case-insensitive)
+    date    : datetime / date of the day wanted
+    rinex2_fallback : if False, only RINEX 4 is looked for
+
+    Priority (the first one that exists is downloaded, and only that one):
+        1. RINEX 4    SSSS00CCC_R_YYYYDDD0000_01D_15S_MO.rnx.gz
+                      (rinex4/obs/YYYY/DDD/, any sampling interval)
+        2. RINEX 2    SSSSDDD0.YYo.gz  (rinex2/obs/YYYY/DDD/)
+
+    RINEX 2 is only tried when RINEX 4 does not exist (not in the daily
+    listing / 404). A network error stops the search instead of silently
+    falling back to an older RINEX version.
+
+    The .gz is extracted with extract_and_remove_gz(). A plain RINEX 4
+    .rnx is converted to Hatanaka (.crx) with `rnx2crx` (must be in the
+    PATH) and the .rnx removed; a RINEX 2 file stays plain (.YYo).
+    Needs the EarthScope CLI ('es') logged in.
+
+    Returns
+    -------
+    Path of the final file (e.g. .../AB0900USA_R_20240600000_01D_15S_MO.crx
+    for RINEX 4, .../CHNR0970.24o for RINEX 2), or None if no file was
+    found / on error.
+    """
+
+    station = station.lower()
+
+    if len(station) != 4:
+        raise ValueError("station must be a 4-character station name")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    doy = date.timetuple().tm_yday
+    yy = date.year % 100
+
+    with _new_session() as session:
+
+        # --- candidates in priority order: (url, file name)
+        candidates = []
+
+        try:
+            names = _list_day(session, date) or []
+
+            for name in names:
+                if _station_ids(name)[1] == station:
+                    candidates.append((_day_url(date) + name, name))
+                    break                        # first one in the listing
+
+        except Exception as e:
+            print(f"WARNING listing {date}: {e} -> RINEX 4 name unknown")
+
+        if rinex2_fallback:
+            dir2 = f"{BASE_URL_RINEX2}/{date.year}/{doy:03d}/"
+
+            # the archive names are upper case (CHNR0970.24o.gz); lower
+            # case is tried too in case a file is stored that way
+            for st in (station.upper(), station):
+                name = f"{st}{doy:03d}0.{yy:02d}o.gz"
+                candidates.append((dir2 + name, name))
+
+        # --- take the first one that exists
+        for url, fname in candidates:
+
+            gz_path = output_dir / fname
+            extracted_path = gz_path.with_suffix("")
+
+            # X.rnx.gz -> X.rnx -> (rnx2crx) -> X.crx ; X.YYo.gz -> X.YYo
+            final_path = (
+                extracted_path.with_suffix(".crx")
+                if extracted_path.suffix.lower() == ".rnx"
+                else extracted_path
+            )
+
+            if final_path.exists():
+                print(f"SKIP  {final_path.name}")
+                return final_path
+
+            try:
+                print(f"GET   {fname}")
+
+                r = _get(session, url, stream=True)
+
+                if r is None:                     # 404: try the next one
+                    print(f"NONE  {fname}")
+                    continue
+
+                with r:
+                    with open(gz_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                f.write(chunk)
+
+                extracted = extract_and_remove_gz(gz_path)
+
+                # Plain RINEX 4 -> Hatanaka; .crx.gz and RINEX 2 are kept
+                if extracted.suffix.lower() == ".rnx":
+                    extracted = _rnx2crx(extracted)
+
+                return extracted
+
+            except Exception as e:
+                # leave nothing half-done (.gz, extracted .rnx, .crx)
+                for p in (gz_path, extracted_path, final_path):
+                    p.unlink(missing_ok=True)
+
+                print(f"ERROR {fname}: {e}")
+                return None
+
+    print(f"NONE  {station} on {date} (DOY {doy:03d})")
+    return None

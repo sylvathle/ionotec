@@ -1,10 +1,10 @@
-
 from ftplib import FTP
 from pathlib import Path
 
 import subprocess
 import requests
 import re
+import time
 
 from datetime import timedelta
 from ionotec.download.extract import extract_and_remove_gz
@@ -205,3 +205,146 @@ def download_cors(station, start, end, output_dir="."):
     print(f"Files available locally: {len(list_files)}")
 
     return list_files
+
+
+# True  -> a downloaded RINEX 2 Hatanaka file (.YYd) is stored uncompressed
+#          (.YYo) with `crx2rnx`, as in igs.py.
+# False -> keep the Hatanaka file (.YYd).
+CONVERT_RINEX2_TO_PLAIN = True
+
+
+def _crx2rnx(crx_path):
+    """
+    Un-compress a RINEX 2 Hatanaka file: `crx2rnx -f file.YYd` ->
+    file.YYo. The .YYd file is removed afterwards. Returns the .YYo Path.
+    """
+    crx_path = Path(crx_path)
+    rnx_path = crx_path.with_suffix(crx_path.suffix[:-1] + "o")   # .24d -> .24o
+
+    try:
+        subprocess.run(
+            ["crx2rnx", "-f", str(crx_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    except FileNotFoundError:
+        raise RuntimeError("crx2rnx was not found in the PATH")
+
+    except subprocess.CalledProcessError as e:
+        rnx_path.unlink(missing_ok=True)
+        raise RuntimeError(f"crx2rnx failed on {crx_path.name}: {e.stderr}")
+
+    if not rnx_path.exists():
+        raise RuntimeError(f"crx2rnx did not create {rnx_path.name}")
+
+    crx_path.unlink()
+
+    return rnx_path
+
+
+def download_file(station, date, output_dir="."):
+    """
+    Download ONE NOAA CORS daily RINEX 2 observation file of a station.
+
+    station : 4-character site name (case-insensitive)
+    date    : datetime / date of the day wanted
+
+    Archive:
+        https://noaa-cors-pds.s3.amazonaws.com/rinex/YYYY/DDD/ssss/ssssDDD0.YYd.gz
+
+    This archive only provides RINEX 2 Hatanaka files, so there is no
+    version to choose from. The .gz is extracted with extract_and_remove_gz();
+    if CONVERT_RINEX2_TO_PLAIN is True (default) the Hatanaka file (.YYd) is
+    converted to plain RINEX 2 (.YYo) with `crx2rnx` (must be in the PATH)
+    and the .YYd removed.
+
+    Returns
+    -------
+    Path of the final file (e.g. .../akrd0960.24o, or .24d if
+    CONVERT_RINEX2_TO_PLAIN is False), or None if the file does not exist
+    or on error.
+    """
+
+    station = station.lower()
+
+    if len(station) != 4:
+        raise ValueError("station must be a 4-character station name")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    year = date.year
+    doy = date.timetuple().tm_yday
+    yy = year % 100
+
+    fname = f"{station}{doy:03d}0.{yy:02d}d.gz"
+
+    url = (
+        f"https://noaa-cors-pds.s3.amazonaws.com/"
+        f"rinex/{year}/{doy:03d}/{station}/{fname}"
+    )
+
+    gz_path = output_dir / fname
+    extracted_path = gz_path.with_suffix("")                  # ssssDDD0.YYd
+
+    final_path = (
+        extracted_path.with_suffix(f".{yy:02d}o")             # ssssDDD0.YYo
+        if CONVERT_RINEX2_TO_PLAIN
+        else extracted_path
+    )
+
+    # Already downloaded
+    if final_path.exists():
+        print(f"SKIP  {final_path.name}")
+        return final_path
+
+    try:
+        print(f"GET   {fname}")
+
+        with requests.Session() as session:
+
+            for attempt in range(3):
+                try:
+                    response = session.get(url, stream=True, timeout=120)
+                    break
+
+                except (
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout,
+                ) as e:
+                    if attempt == 2:
+                        raise
+
+                    print(f"WARNING {fname}: {e} -> retry in {2 * (attempt + 1)} s")
+                    time.sleep(2 * (attempt + 1))
+
+            with response:
+
+                if response.status_code == 404:
+                    print(f"NONE  {station} on {date} (DOY {doy:03d})")
+                    return None
+
+                response.raise_for_status()
+
+                with open(gz_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+
+        extracted = extract_and_remove_gz(gz_path)
+
+        if CONVERT_RINEX2_TO_PLAIN:
+            extracted = _crx2rnx(extracted)
+
+        return extracted
+
+    except Exception as e:
+
+        # leave nothing half-done (.gz, extracted .YYd, .YYo)
+        for p in (gz_path, extracted_path, final_path):
+            p.unlink(missing_ok=True)
+
+        print(f"ERROR {fname}: {e}")
+        return None

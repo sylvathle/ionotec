@@ -838,7 +838,7 @@ class gnss:
             #svtype = head['constellation']
 
             list_df_nav = nav.read_data()
-            print (list_df_nav)
+            #print (list_df_nav)
             for sv in list_df_nav.keys():
                 if sv not in self.df_nav_gnss.keys(): self.df_nav_gnss[sv] = list_df_nav[sv]
                 else: self.df_nav_gnss[sv] = pd.concat([self.df_nav_gnss[sv],list_df_nav[sv]])

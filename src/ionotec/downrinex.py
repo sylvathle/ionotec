@@ -31,6 +31,10 @@ def download_rinex(station, d, output_dir='.'):
     source = getSource(station)
     if source=='igs':
         return igs.download_file(station,d,output_dir)
+    if source=='earthscope':
+        return earthscope.download_file(station,d,output_dir)
+    if source=='cors':
+        return cors.download_file(station,d,output_dir)
 
 class downrinex:
 
