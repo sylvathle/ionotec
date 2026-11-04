@@ -108,6 +108,7 @@ class tec:
         self.rDCB_interval = timedelta(days=3)
 
         self.gnss = gnss.gnss(datemin=datemin,datemax=datemax)
+        self.sat_dcb = DCB.load_dcb(datemin=self.datemin,datemax=self.datemax)
 
         #self.gnss = nav
 
@@ -224,7 +225,6 @@ class tec:
 
         self.gnss.load_all_sats(list_satellites=list_all_sv)        
 
-        self.sat_dcb = DCB.load_dcb(datemin=self.datemin,datemax=self.datemax)
 
 
     def get_channels(self,constellation,df_rinex):
