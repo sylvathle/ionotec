@@ -219,26 +219,35 @@ def down_obs_files(datemin,datemax,station,dest):
     return downloaded_files
 
 
-def get_dcb_from_cddis(year,doy,DEST_DIR_BASE):
-
-    BASE_URL = "https://cddis.nasa.gov/archive/gnss/products/bias/"+str(year)+"/"
+def get_dcb_from_cddis(year, doy, DEST_DIR_BASE):
+    BASE_URL = "https://cddis.nasa.gov/archive/gnss/products/bias/" + str(year) + "/"
     DEST_DIR = DEST_DIR_BASE + str(year) + "/"
     os.makedirs(DEST_DIR, exist_ok=True)
     session = requests.Session()
 
     str_doy = str(doy)
-    if doy<10: str_doy = '00'+str_doy
-    elif doy<100: str_doy = '0'+str_doy
+    if doy < 10:
+        str_doy = "00" + str_doy
+    elif doy < 100:
+        str_doy = "0" + str_doy
 
-    if os.path.exists(DEST_DIR+"CAS0MGXRAP_"+str(year)+str_doy+"0000_01D_01D_DCB.BSX"): 
-        return DEST_DIR+"CAS0MGXRAP_"+str(year)+str_doy+"0000_01D_01D_DCB.BSX"
-    if os.path.exists(DEST_DIR+"CAS0OPSRAP_"+str(year)+str_doy+"0000_01D_01D_DCB.BIA"): 
-        return DEST_DIR+"CAS0OPSRAP_"+str(year)+str_doy+"0000_01D_01D_DCB.BIA"
-    
-    #print (DEST_DIR)
+    # Define the target patterns in strict priority order
+    target_patterns = [
+        f"CAS0MGXRAP_{year}{str_doy}0000_01D_01D_DCB.BSX",
+        f"CAS0OPSRAP_{year}{str_doy}0000_01D_01D_DCB.BIA",
+        f"CAS1OPSRAP_{year}{str_doy}0000_01D_01D_DCB.BIA"
+    ]
 
-    max_retry_time = 60  # seconds
+    # Step 1: Check if any uncompressed file already exists locally in priority order
+    for pattern in target_patterns:
+        local_path = os.path.join(DEST_DIR, pattern)
+        if os.path.exists(local_path):
+            return local_path
+
+    # Step 2: Fetch the directory page from CDDIS if not found locally
+    max_retry_time = 600  # seconds
     start_time = time.time()
+    soup = None
 
     while True:
         try:
@@ -246,92 +255,71 @@ def get_dcb_from_cddis(year,doy,DEST_DIR_BASE):
                 r.raise_for_status()
                 soup = BeautifulSoup(r.text, "html.parser")
             break
-    
+
         except Exception as e:
             elapsed = time.time() - start_time
-    
             if elapsed >= max_retry_time:
                 print(f"Failed to contact {BASE_URL} after {elapsed:.1f} s: {e}")
                 return
-    
-            print(f"Concat failed ({e}). Retrying in 1 second...")
+            print(f"Connection failed ({e}). Retrying in 1 second...")
             time.sleep(1)
 
-    # Step 2: extract file links
-    links = []
-    for a in soup.find_all("a"):
-        href = a.get("href")
+    # Collect all available links and strip whitespace to prevent trailing spaces/%20 issues
+    available_links = {a.get("href").strip() for a in soup.find_all("a") if a.get("href")}
 
-        if not href:
-            continue
-    
-        if ("CAS0MGXRAP_"+str(year)+str_doy not in href) and ("CAS0OPSRAP_"+str(year)+str_doy not in href):
-            continue
-        #print (href)
-    
-        splthref = href.split('.')
-        suff = splthref[0]
-        ext = splthref[1]
+    # Step 3: Check patterns on the server in priority order and download only the first match found
+    for pattern in target_patterns:
+        matching_link = None
+        for href in available_links:
+            if pattern in href:
+                matching_link = href
+                break
 
-        file_in_dest = suff+'.'+ext
-        if os.path.exists(DEST_DIR+file_in_dest): 
-            #print (file_in_dest,"exists")
-            continue
-        links.append(href.strip())
-    
-    #print(f"Found {len(links)} files")
-    #print (links)
-    if len(links)==0: 
-        return
-    #headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:39.0)'}
+        if not matching_link:
+            continue  # Try the next lower-priority pattern
 
-    list_dcb_downloaded = []
+        local_file_path = os.path.join(DEST_DIR, matching_link)
+        uncompressed_path = local_file_path.replace(".gz", "")
 
-    # Step 3: download each file
-    for file in links:
+        # If the uncompressed file already exists from a previous run
+        if os.path.exists(uncompressed_path):
+            return uncompressed_path
 
-        url = BASE_URL + file
+        # Download the highest priority file found
+        print(f"Downloading {matching_link}...")
+        download_retry_time = 60
+        download_start = time.time()
 
-        local_path = os.path.join(DEST_DIR, file)
-        
-        # Skip if the compressed file already exists
-        if os.path.isfile(local_path.replace('.gz','')):
-            #print(f"Skipping {file} (already downloaded)")
-            return local_path.replace('.gz','')
-            #continue
-
-        print(f"Downloading {file}...")
-        max_retry_time = 60  # seconds
-        start_time = time.time()
-        
         while True:
             try:
-                with session.get(url, stream=True, timeout=30) as r:
+                with session.get(BASE_URL + matching_link, stream=True, timeout=30) as r:
                     r.raise_for_status()
-        
-                    with open(local_path, "wb") as f:
+                    with open(local_file_path, "wb") as f:
                         for chunk in r.iter_content(chunk_size=8192):
                             if chunk:
                                 f.write(chunk)
-        
-                print(f"Successfully downloaded {file}")
+
+                print(f"Successfully downloaded {matching_link}")
                 break
-        
+
             except Exception as e:
-                elapsed = time.time() - start_time
-        
-                if elapsed >= max_retry_time:
-                    print(f"Failed to download {file} after {elapsed:.1f} s: {e}")
+                elapsed = time.time() - download_start
+                if elapsed >= download_retry_time:
+                    print(f"Failed to download {matching_link} after {elapsed:.1f} s: {e}")
                     raise
-        
                 print(f"Download failed ({e}). Retrying in 1 second...")
                 time.sleep(1)
 
+        # Extract if compressed, clean up, and return immediately
+        if matching_link.endswith(".gz"):
+            extract_gz_files(local_file_path, uncompressed_path)
+            os.remove(local_file_path)
 
-        
-        extract_gz_files(local_path,DEST_DIR+file.replace('.gz',''))
-        os.remove(local_path)
-        return local_path.replace('.gz','')
+        return uncompressed_path
+
+    # If none of the patterns exist locally or on the server
+    print(f"No valid DCB file found for year {year}, DOY {str_doy}")
+    return None
 
 
 

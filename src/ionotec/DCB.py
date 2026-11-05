@@ -368,13 +368,49 @@ def load_dcb(datemin=None,datemax=None):
         if file.is_file():
             list_sorted_DCB.append(str(file.resolve()))
             
-    for i in range((datemax.date() - datemin.date()).days + 1):
+    #for i in range((datemax.date() - datemin.date()).days + 1):
+    #    d = datemin.date() + timedelta(days=i)
+    #    year = d.year
+    #    doy = (d - date(year,1,1)).days + 1
+    #    DCB_file = DCB_dir +str(year)+ "/CAS0MGXRAP_"+str(year)+str(doy)+"0000_01D_01D_DCB.BSX"
+    #    DCB_file = igs.get_dcb_from_cddis(year,doy,DCB_dir)
+    #    list_used_dcb.append(DCB_file)
+
+    for i in range((datemax.date() - datemin.date()).days + 1): 
         d = datemin.date() + timedelta(days=i)
         year = d.year
-        doy = (d - date(year,1,1)).days + 1
-        DCB_file = DCB_dir +str(year)+ "/CAS0MGXRAP_"+str(year)+str(doy)+"0000_01D_01D_DCB.BSX"
-        DCB_file = igs.get_dcb_from_cddis(year,doy,DCB_dir)
-        list_used_dcb.append(DCB_file)
+        doy = (d - date(year, 1, 1)).days + 1 
+    
+        # Format DOY with leading zeros (e.g., 001, 045)
+        str_doy = str(doy)
+        if doy < 10: 
+            str_doy = '00' + str_doy
+        elif doy < 100: 
+            str_doy = '0' + str_doy
+        
+        DEST_DIR = os.path.join(DCB_dir, str(year))
+    
+        # List of possible prefixes to check in order of priority
+        prefixes = ["CAS0MGXRAP_", "CAS0OPSRAP_", "CAS1OPSRAP_"]
+        DCB_file = None
+    
+        # Check each pattern locally first
+        for prefix in prefixes:
+            filename = f"{prefix}{year}{str_doy}0000_01D_01D_DCB.BSX"
+            candidate_path = os.path.join(DEST_DIR, filename)
+        
+            if os.path.exists(candidate_path):
+                DCB_file = candidate_path
+                break
+            
+        # If not found locally, call the download function to fetch it
+        if not DCB_file:
+            DCB_file = igs.get_dcb_from_cddis(year, doy, DCB_dir)
+        
+        if DCB_file:
+            list_used_dcb.append(DCB_file)
+        else:
+            print(f"Warning: No valid DCB file found for year {year}, DOY {doy}")
     
     df_dcb = pd.DataFrame()
     
