@@ -245,25 +245,17 @@ class rinex:
             if "COMPACT" in self.header['type_rinex']:
                 #self.read_obs_rinexv2()
                 for constellation in ['G','R']:
-                    #print (constellation)
-                    #print (self.vars_list)
                     try:
                         obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
                         df_temp = obs.to_dataframe()
                         del obs
                         df_temp.reset_index(inplace=True)
-                        #print (df_temp)
                         self.list_df[constellation] = df_temp                    
                     except:
                         continue
-               # for const in self.list_df.keys():
-                #    print (self.list_df[const])
-                #sys.exit()
                 return self.list_df
             if self.header['type']=='O':     
                 for constellation in ['G','R']:
-                #for constellation in ['G']:
-                    #print (self.vars_list)
                     try:
                         obs = gr.load(self.rinex_path, meas=self.vars_list, use=constellation)
                         df_temp = obs.to_dataframe()
@@ -294,7 +286,6 @@ class rinex:
                 #nav = gr.load(self.rinex_path)
                 #self.df_nav = nav.to_dataframe()
 
-                #print (self.header['constellation'])
 
                 if self.header['constellation']=='M':
                     return self.read_nav3()
@@ -321,7 +312,6 @@ class rinex:
                     nav = self.read_nav4_xyz()
                 return self.df_nav
             elif "COMPACT" in self.header['type_rinex']:
-                #print (self.header)
                 self.read_obs()
                 return self.list_df
 
@@ -381,13 +371,8 @@ class rinex:
             self.line = self.file.readline() 
 
             if (len(self.line)>0) and (self.line[0]=='>'): 
-                #print (self.line)
                 self.isHeader=True
                 self.read_header()
-                #print ("1 LEAVE FOR FILE for restarting hatanaka '>' at beginning of file", self.rinex_path)
-                #self.file.close()
-                #break
-            #print('readline',self.line)
             if not self.line: 
                 break
             
@@ -396,12 +381,6 @@ class rinex:
             data_head_line = merge_str(data_head_line,self.line.replace("&","0"))
             d,nsat,list_sats = process_head_data_line(data_head_line)
 
-            #print (d)
-            #print (self.line.replace("\n",""))
-            #if self.line[0]=='>': break
-        
-            
-            #line = file.readline()
             if not self.file.readline(): 
                 break
             if self.line[0]=='>': 
@@ -968,7 +947,7 @@ class rinex:
 
     def read_ephemerids(self):
 
-        if int(self.header['version']==4): self.line = self.file.readline()
+        if int(self.header['version'])==4: self.line = self.file.readline()
         sv=self.line[:3]
         sv = sv.replace(" ","0")
         y = int(self.line[4:8])
@@ -1117,7 +1096,7 @@ class rinex:
     def read_ecef(self):
 
         #self.line = self.file.readline()
-        if int(self.header['version']==4): self.line = self.file.readline()
+        if int(self.header['version'])==4: self.line = self.file.readline()
         sv=self.line[:3]
         sv = sv.replace(" ","0")
         y = int(self.line[4:8])
@@ -1235,7 +1214,6 @@ class rinex:
             #df_sv.index = pd.to_datetime(df_sv.index)
 
             list_df_nav[sv] = df_sv
-        #    print (df_sv)
 
         for sv in df_nav_ecef['sv'].unique().tolist():
             df_sv = df_nav_ecef[df_nav_ecef['sv']==sv]
@@ -1272,6 +1250,7 @@ class rinex:
 
         while self.line:
            
+            
             #i += 1    
             if self.line[0:5]!="> EPH": 
                 self.line = self.file.readline()
@@ -1301,7 +1280,6 @@ class rinex:
             #df_sv.index = pd.to_datetime(df_sv.index)
 
             list_df_nav[sv] = df_sv
-        #    print (df_sv)
 
         for sv in df_nav_ecef['sv'].unique().tolist():
             df_sv = df_nav_ecef[df_nav_ecef['sv']==sv]
