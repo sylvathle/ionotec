@@ -312,6 +312,7 @@ class tec:
             #C1, C2 = '', ''
             #L1, L2 = '', ''
             #S1, S2 = '', ''
+            chan = {}
             for c in ['C','X','A','B','Z']:
                 varc1 = 'C1'+c
                 if varc1 in list_cols:

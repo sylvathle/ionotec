@@ -235,7 +235,8 @@ def get_dcb_from_cddis(year, doy, DEST_DIR_BASE):
     target_patterns = [
         f"CAS0MGXRAP_{year}{str_doy}0000_01D_01D_DCB.BSX",
         f"CAS0OPSRAP_{year}{str_doy}0000_01D_01D_DCB.BIA",
-        f"CAS1OPSRAP_{year}{str_doy}0000_01D_01D_DCB.BIA"
+        f"CAS1OPSRAP_{year}{str_doy}0000_01D_01D_DCB.BIA",
+        f"GFZ0OPSRAP_{year}{str_doy}0000_01D_01D_DCB.BIA"
     ]
 
     # Step 1: Check if any uncompressed file already exists locally in priority order

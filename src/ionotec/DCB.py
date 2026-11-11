@@ -391,7 +391,7 @@ def load_dcb(datemin=None,datemax=None):
         DEST_DIR = os.path.join(DCB_dir, str(year))
     
         # List of possible prefixes to check in order of priority
-        prefixes = ["CAS0MGXRAP_", "CAS0OPSRAP_", "CAS1OPSRAP_"]
+        prefixes = ["CAS0MGXRAP_", "CAS0OPSRAP_", "CAS1OPSRAP_","GFZ0OPSRAP_"]
         DCB_file = None
     
         # Check each pattern locally first
