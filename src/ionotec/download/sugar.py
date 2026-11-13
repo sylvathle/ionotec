@@ -1,18 +1,20 @@
-
 from ftplib import FTP
 from pathlib import Path
 
 import subprocess
-import requests
-import re
 
 from datetime import timedelta
 from ionotec.download.extract import extract_and_remove_gz
 
+FTP_HOST = "ftp.earthobservatory.sg"
+
+# Compression extensions found on the server, in order of preference
+COMPRESSIONS = (".gz", ".Z")
+
 
 def stations_available_sugar(start, end):
 
-    ftp = FTP("ftp.earthobservatory.sg", timeout=60)
+    ftp = FTP(FTP_HOST, timeout=60)
     ftp.login()
 
     list_stations = set()
@@ -44,9 +46,100 @@ def stations_available_sugar(start, end):
     return sorted(list_stations)
 
 
+def extract_and_remove_z(z_path):
+    """Decompress a Unix-compress (.Z, LZW) file and remove the archive.
+
+    Uses `gzip -dc` (gzip reads .Z natively); falls back to the `unlzw3`
+    package if gzip is not available.
+
+    Returns
+    -------
+    pathlib.Path
+        Path of the decompressed file (archive name without the .Z suffix).
+    """
+    z_path = Path(z_path)
+    out_path = z_path.with_suffix("")
+
+    try:
+        try:
+            with out_path.open("wb") as f:
+                subprocess.run(
+                    ["gzip", "-dc", str(z_path)],
+                    stdout=f, stderr=subprocess.PIPE, check=True,
+                )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            # gzip missing or refused the file -> pure-Python fallback
+            import unlzw3  # pip install unlzw3
+            out_path.write_bytes(unlzw3.unlzw(z_path.read_bytes()))
+    except Exception:
+        out_path.unlink(missing_ok=True)
+        raise
+
+    z_path.unlink()
+    return out_path
+
+
+def _extract(path):
+    """Extract a downloaded archive according to its extension."""
+    if path.suffix == ".Z":
+        return extract_and_remove_z(path)
+    return extract_and_remove_gz(path)
+
+
+def _fetch_day(ftp, station, date, output_dir):
+    """Download + extract one daily file on an already-logged-in FTP session.
+
+    Tries each extension in COMPRESSIONS (.gz, then .Z).
+    Returns the extracted path, or None if unavailable.
+    """
+    year = date.year
+    doy = date.timetuple().tm_yday
+    base = f"{station}{doy:03d}0.{year % 100:02d}d"
+    output_path = output_dir / base
+
+    if output_path.exists():
+        print(f"SKIP  {output_path.name}")
+        return output_path
+
+    remote_dir = f"/SugarData/{year}/{station}/RINEX2-HATANAKA"
+    try:
+        ftp.cwd(remote_dir)
+    except Exception as e:
+        print(f"ERROR accessing {remote_dir}: {e}")
+        return None
+
+    last_err = None
+    for ext in COMPRESSIONS:
+        fname = base + ext
+        local = output_dir / fname
+
+        try:
+            print(f"GET   {fname}")
+            with local.open("wb") as f:
+                ftp.retrbinary(f"RETR {fname}", f.write)
+        except Exception as e:
+            # not on server with this extension (or transfer failed): try next
+            local.unlink(missing_ok=True)
+            last_err = e
+            continue
+
+        try:
+            out = _extract(local)
+            print(f"OK    {out.name}")
+            return out
+        except Exception as e:
+            local.unlink(missing_ok=True)
+            print(f"ERROR extracting {fname}: {e}")
+            return None
+
+    print(f"NONE  {station} on {date} (DOY {doy:03d}): {last_err}")
+    return None
+
 
 def download_file(station, date, output_dir="."):
     """Download one daily SuGAr RINEX 2 Hatanaka observation file.
+
+    The remote file may be compressed as .gz or .Z; both are handled.
 
     Parameters
     ----------
@@ -73,34 +166,14 @@ def download_file(station, date, output_dir="."):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    year = date.year
-    doy = date.timetuple().tm_yday
-    fname = f"{station}{doy:03d}0.{year % 100:02d}d.gz"
-    gz_path = output_dir / fname
-    output_path = gz_path.with_suffix("")
-    remote_dir = f"/SugarData/{year}/{station}/RINEX2-HATANAKA"
-
-    if output_path.exists():
-        print(f"SKIP  {output_path.name}")
-        return output_path
-
     ftp = None
     try:
-        ftp = FTP("ftp.earthobservatory.sg", timeout=60)
+        ftp = FTP(FTP_HOST, timeout=60)
         ftp.login()
-        ftp.cwd(remote_dir)
-
-        print(f"GET   {fname}")
-        with gz_path.open("wb") as f:
-            ftp.retrbinary(f"RETR {fname}", f.write)
-
-        output_path = extract_and_remove_gz(gz_path)
-        print(f"OK    {output_path.name}")
-        return output_path
+        return _fetch_day(ftp, station, date, output_dir)
 
     except Exception as e:
-        gz_path.unlink(missing_ok=True)
-        print(f"NONE  {station} on {date} (DOY {doy:03d}): {e}")
+        print(f"NONE  {station} on {date}: {e}")
         return None
 
     finally:
@@ -110,8 +183,12 @@ def download_file(station, date, output_dir="."):
             except Exception:
                 ftp.close()
 
-def download_sugar(station, start, end, output_dir="."):
 
+def download_sugar(station, start, end, output_dir="."):
+    """Download daily files for [start, end) (end exclusive) on one session.
+
+    Returns the list of extracted file paths.
+    """
     station = station.lower()
 
     if len(station) != 4:
@@ -124,69 +201,20 @@ def download_sugar(station, start, end, output_dir="."):
 
     list_files = []
 
-    ftp = FTP("ftp.earthobservatory.sg", timeout=60)
+    ftp = FTP(FTP_HOST, timeout=60)
     ftp.login()
 
-    d = start
-
-    while d < end:
-
-        year = d.year
-        doy = d.timetuple().tm_yday
-
-        remote_dir = (
-            f"/SugarData/{year}/{station}/RINEX2-HATANAKA"
-        )
-
-        fname = f"{station}{doy:03d}0.{year % 100:02d}d.gz"
-
-        try:
-            ftp.cwd(remote_dir)
-
-        except Exception as e:
-            print(f"ERROR accessing {remote_dir}: {e}")
+    try:
+        d = start
+        while d < end:
+            path = _fetch_day(ftp, station, d, output_dir)
+            if path is not None:
+                list_files.append(path)
             d += timedelta(days=1)
-            continue
-
-        gz_path = output_dir / fname
-        crx_path = gz_path.with_suffix("")
-
-        # Already extracted
-        if crx_path.exists():
-            print(f"SKIP  {crx_path.name}")
-            list_files.append(crx_path)
-            d += timedelta(days=1)
-            continue
-
-        # Download
+    finally:
         try:
-            print(f"GET   {fname}")
+            ftp.quit()
+        except Exception:
+            ftp.close()
 
-            with open(gz_path, "wb") as f:
-                ftp.retrbinary(
-                    f"RETR {fname}",
-                    f.write
-                )
-
-        except Exception as e:
-
-            if gz_path.exists():
-                gz_path.unlink()
-
-            print(f"NONE  {station} on {d} "
-                  f"(DOY {doy:03d}): {e}")
-
-            d += timedelta(days=1)
-            continue
-
-        # Extract .gz -> .d
-        try:
-            crx_path = extract_and_remove_gz(gz_path)
-            list_files.append(crx_path)
-
-        except Exception as e:
-
-            if gz_path.exists():
-                gz_path.unlink()
-
-            print(f"ERROR extracting {fname}: {e}")
+    return list_files
