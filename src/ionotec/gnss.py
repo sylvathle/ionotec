@@ -688,8 +688,8 @@ class gnss:
     #f_doy_reported = ""
     
     
-    def __init__(self,datemin=None, datemax=None, reprocess=False):
-        self.gnss_dir = st.root_dir + "GNSS/"
+    def __init__(self,datemin=None, datemax=None, reprocess=False, root_dir = "./output/"):
+        self.gnss_dir = root_dir + "GNSS/"
         
         if not os.path.exists(self.gnss_dir):
             try: Path(self.gnss_dir).mkdir(parents=True,exist_ok=True)

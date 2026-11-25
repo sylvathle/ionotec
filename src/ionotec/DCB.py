@@ -353,9 +353,9 @@ def getBias_fromfile(sat,file,chanel1, chanel2):
                         return float(splt_line[8])
     return float('NaN')
 
-def load_dcb(datemin=None,datemax=None):
+def load_dcb(datemin=None,datemax=None,root_dir="./output/"):
 
-    DCB_dir = st.root_dir + 'DCB/'
+    DCB_dir = root_dir + 'DCB/'
     os.makedirs(DCB_dir,exist_ok=True)
 
     list_used_dcb = []

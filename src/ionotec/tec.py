@@ -55,7 +55,7 @@ import traceback
 from pathlib import Path
 
 #from .stations import root_dir
-from . import stations as st
+#from . import stations as st
 from . import rinex as rx
 from . import freq
 from . import DCB
@@ -76,10 +76,11 @@ R_E = 6371000
 
 class tec:
 
-    def __init__(self,datemin,datemax,list_rinex_obs=None,station_remote=None, h = 350000):
+    def __init__(self,datemin,datemax,list_rinex_obs=None,station_remote=None, h = 350000, root_dir = "./output/"):
         
 
         self.station = ""
+        self.root_dir = root_dir
 
         self.read_remote=False
         if list_rinex_obs!=None:
@@ -107,14 +108,11 @@ class tec:
 
         self.rDCB_interval = timedelta(days=3)
 
-        self.gnss = gnss.gnss(datemin=datemin,datemax=datemax)
-        self.sat_dcb = DCB.load_dcb(datemin=self.datemin,datemax=self.datemax)
+        Path(self.root_dir).mkdir(parents=True, exist_ok=True)
 
-        #self.gnss = nav
+        self.gnss = gnss.gnss(datemin=datemin,datemax=datemax, root_dir=self.root_dir)
+        self.sat_dcb = DCB.load_dcb(datemin=self.datemin,datemax=self.datemax, root_dir=self.root_dir)
 
-    def set_root_dir(self,root_dir):
-        st.root_dir = root_dir
-        Path(st.root_dir).mkdir(parents=True, exist_ok=True)
         
 
     def set_h(self,h): 
@@ -1433,7 +1431,7 @@ class tec:
             ])
             
 
-        feather_path = st.root_dir + "TEC/" + self.station
+        feather_path = self.root_dir + "TEC/" + self.station
         df_obs.to_feather(feather_path+".feather")
     
     #def compute_vtec(self):	
@@ -1494,7 +1492,7 @@ class tec:
                 #for year in self.df_obs.index.year.unique():
                 # Filter the dataframe for the current year
                 #df_year = self.df_obs[self.df_obs.index.year == year]
-                folder = st.root_dir + "TEC/"
+                folder = self.root_dir + "TEC/"
                 #Path(folder).mkdir(parents=True, exist_ok=True)
                 feather_path = folder + self.station
                 self.df_obs.to_feather(feather_path+".feather")
