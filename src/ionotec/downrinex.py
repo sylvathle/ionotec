@@ -9,6 +9,11 @@ from ionotec.download import garner
 from ionotec.download import earthscope
 from ionotec.download import australia
 from ionotec.download import ramsac
+from ionotec.download import nrcan
+from ionotec.download import chain
+from ionotec.download import afref
+from ionotec.download import panga
+from ionotec.download import whu
 
 
 from pathlib import Path
@@ -51,6 +56,18 @@ def download_rinex(station, d, output_dir='.'):
         return hongkong.download_file(station,d,output_dir)
     if source=='sonel':
         return sonel.download_file(station,d,output_dir)
+    if source=='nrcan':
+        return nrcan.download_file(station,d,output_dir)
+    if source=='chain':
+        return chain.download_file(station,d,output_dir)
+    if source=='afref':
+        return afref.download_file(station,d,output_dir)
+    if source=='panga':
+        return panga.download_file(station,d,output_dir)
+    if source=='whu':
+        return whu.download_file(station,d,output_dir)
+
+
 
 class downrinex:
 
@@ -160,6 +177,36 @@ class downrinex:
                 )
                 print("WARNING geonet unavailable, skipped (see sources_errors.log)")
 
+        #### NRCAN (Canada): RINEX 3
+        if source in ['all','nrcan']:
+            try:
+                available_stations = nrcan.stations_available_nrcan(self.date_start, self.date_end)
+                for station in available_stations:
+                    if station in self.list_stations: continue
+                    self.dict_station_source[station]='nrcan'
+                    self.list_stations.append(station)
+            except Exception:
+                logging.exception(
+                    "nrcan: stations_available_geonet failed (%s - %s)",
+                    self.date_start, self.date_end,
+                )
+                print("WARNING nrcan unavailable, skipped (see sources_errors.log)")
+
+        #### NRCAN (Canada): RINEX 3
+        if source in ['all','chain']:
+            try:
+                available_stations = chain.stations_available_chain(self.date_start, self.date_end)
+                for station in available_stations:
+                    if station in self.list_stations: continue
+                    self.dict_station_source[station]='chain'
+                    self.list_stations.append(station)
+            except Exception:
+                logging.exception(
+                    "chain: stations_available_geonet failed (%s - %s)",
+                    self.date_start, self.date_end,
+                )
+                print("WARNING chain unavailable, skipped (see sources_errors.log)")
+
         #### HONGKONG (Sumatra): RINEX 3
         if source in ['all','hongkong']:
             try:
@@ -174,6 +221,51 @@ class downrinex:
                     self.date_start, self.date_end,
                 )
                 print("WARNING hongkong unavailable, skipped (see sources_errors.log)")
+
+        #### PANGA RINEX 3
+        if source in ['all', 'panga']:
+            try:
+                available_stations = panga.stations_available_panga(self.date_start, self.date_end)
+                for station in available_stations:
+                    if station in self.list_stations: continue
+                    self.dict_station_source[station] = 'panga'
+                    self.list_stations.append(station)
+            except Exception:
+                logging.exception(
+                    "panga: stations_available_cors failed (%s - %s)",
+                    self.date_start, self.date_end,
+                )
+                print("WARNING panga unavailable, skipped (see sources_errors.log)")
+
+        #### WUHAN RINEX 3
+        if source in ['all', 'whu']:
+            try:
+                available_stations = whu.stations_available_whu(self.date_start, self.date_end)
+                for station in available_stations:
+                    if station in self.list_stations: continue
+                    self.dict_station_source[station] = 'whu'
+                    self.list_stations.append(station)
+            except Exception:
+                logging.exception(
+                    "whu: stations_available_cors failed (%s - %s)",
+                    self.date_start, self.date_end,
+                )
+                print("WARNING whu unavailable, skipped (see sources_errors.log)")
+
+        #### AFERF RINEX 3
+        if source in ['all', 'afref']:
+            try:
+                available_stations = afref.stations_available_afref(self.date_start, self.date_end)
+                for station in available_stations:
+                    if station in self.list_stations: continue
+                    self.dict_station_source[station] = 'afref'
+                    self.list_stations.append(station)
+            except Exception:
+                logging.exception(
+                    "afref: stations_available_cors failed (%s - %s)",
+                    self.date_start, self.date_end,
+                )
+                print("WARNING afref unavailable, skipped (see sources_errors.log)")
 
 
         #### CORS: RINEX 2
@@ -267,6 +359,16 @@ class downrinex:
             return australia.download_australia(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
         if source  == 'ramsac':
             return ramsac.download_ramsac(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
+        if source  == 'nrcan':
+            return nrcan.download_rncan(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
+        if source  == 'chain':
+            return chain.download_chain(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
+        if source  == 'afref':
+            return afref.download_afref(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
+        if source  == 'panga':
+            return panga.download_panga(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
+
+
 
 
 

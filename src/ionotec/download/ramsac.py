@@ -7,8 +7,8 @@ import json
 import time
 import datetime as _dt
 import subprocess
+import urllib.request
 import requests
-from requests.exceptions import ConnectionError, ConnectTimeout
 
 # RAMSAC (IGN Argentina) daily RINEX 2 Hatanaka files, Unix-compressed (.Z):
 #   https://ramsac.ign.gob.ar/api/v1/rinex/download/5/fosa0010.24d.Z
@@ -69,21 +69,69 @@ _CACHE = None
 _BUNDLE_TRIED = False
 
 
+def _issuer_urls_stdlib(pem):
+    """'CA Issuers' URLs of a PEM certificate, without the cryptography package
+    (uses CPython's certificate decoder through a temporary file)."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False) as f:
+        f.write(pem)
+        tmp = f.name
+    try:
+        info = ssl._ssl._test_decode_cert(tmp)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+    return list(info.get("caIssuers", ()))
+
+
+def _build_ca_bundle_stdlib(path, host):
+    """Fallback of build_ca_bundle when `cryptography` is not installed:
+    follow the CA Issuers links with the standard library only."""
+    import certifi
+
+    pem = ssl.get_server_certificate((host, 443))
+    extra = []
+
+    for _ in range(5):
+        urls = _issuer_urls_stdlib(pem)
+        if not urls:
+            break
+
+        with urllib.request.urlopen(urls[0], timeout=30) as r:
+            data = r.read()
+
+        pem = data.decode() if data.lstrip().startswith(b"-----BEGIN") \
+            else ssl.DER_cert_to_PEM_cert(data)
+        extra.append(pem.encode())
+
+    if not extra:
+        raise RuntimeError("no intermediate certificate found")
+
+    path.write_bytes(Path(certifi.where()).read_bytes() + b"\n" + b"\n".join(extra))
+    return path
+
+
 def build_ca_bundle(path=None, host="ramsac.ign.gob.ar"):
     """
     Build a CA bundle that works for RAMSAC: the usual trusted roots
     (certifi) plus the intermediate certificate(s) the server forgets to
     send. They are found by following the "CA Issuers" links of the
     server's certificate (Let's Encrypt YR1 -> its issuer -> ...).
-    Needs the `cryptography` package (installed with paramiko).
+    Uses the `cryptography` package when available (installed with paramiko),
+    otherwise falls back to the standard library.
     """
     import certifi
-    from cryptography import x509
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.x509.oid import AuthorityInformationAccessOID, ExtensionOID
 
     path = Path(path or CA_BUNDLE)
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.x509.oid import AuthorityInformationAccessOID, ExtensionOID
+    except ImportError:
+        return _build_ca_bundle_stdlib(path, host)
 
     # Only reads the server's own certificate (no verification needed).
     leaf_pem = ssl.get_server_certificate((host, 443))
@@ -298,63 +346,59 @@ def _uncompress(z_path):
     out_path.unlink(missing_ok=True)
     raise RuntimeError("neither gzip nor uncompress was found in the PATH")
 
-def stations_available_ramsac(start_date=None, end_date=None):
+def stations_available_ramsac(start_date=None, end_date=None, check=False):
     """
-    Query and return the list of available RAMSAC stations.
+    Return the RAMSAC stations that may have data in [start_date, end_date).
 
-    If the RAMSAC server (ramsac.ign.gob.ar) is down, unreachable, or times out,
-    this function prints a clear warning and safely returns an empty list [].
+    RAMSAC has no station-list endpoint (/api/v1/rinex/stations answers
+    405), so the list comes from STATIONS, minus the stations whose last
+    published file (LAST_FILE) is before start_date.
 
     Parameters
     ----------
-    start_date : datetime or date, optional
-        Start date filter (if supported by your API endpoint).
-    end_date : datetime or date, optional
-        End date filter (if supported by your API endpoint).
+    start_date, end_date : datetime or date, optional
+        Period of interest.
+    check : bool
+        True -> also ask the server (HEAD request, cached on disk) and keep
+        only the stations that have at least one file in the period.
+        One request per station and day: slow for long periods.
 
     Returns
     -------
-    list of str
-        List of 4-character station names, or [] if the server is unreachable.
+    sorted list of str
+        4-character station names (lower case).
     """
-    url = "https://ramsac.ign.gob.ar/api/v1/rinex/stations"
-    list_stations = []
+    start = start_date.date() if hasattr(start_date, "date") else start_date
 
-    try:
-        # Request with a 10s connection timeout and 30s read timeout
-        response = requests.get(url, timeout=(10, 30))
-        response.raise_for_status()
+    stations = [
+        s for s in STATIONS
+        if not (start is not None and USE_LAST_FILE_SKIP
+                and s in LAST_FILE and LAST_FILE[s] < start)
+    ]
 
-        data = response.json()
-        # Parse station names from API response dictionary/list
-        if isinstance(data, list):
-            list_stations = [
-                s.get("name", "").lower()[:4]
-                for s in data
-                if s.get("name")
-            ]
-        elif isinstance(data, dict):
-            raw_list = data.get("stations", [])
-            list_stations = [
-                s.get("name", "").lower()[:4] if isinstance(s, dict) else str(s).lower()[:4]
-                for s in raw_list
-            ]
+    if not check or start_date is None or end_date is None:
+        return sorted(stations)
 
-    except (ConnectTimeout, ConnectionError) as e:
-        print(f"WARNING: RAMSAC server (ramsac.ign.gob.ar) connection timed out or network is down: {e}")
-        print("         Returning empty station list for RAMSAC.")
-        return []
+    found = []
 
-    except RequestException as e:
-        print(f"WARNING: Failed to retrieve RAMSAC station list ({e})")
-        print("         Returning empty station list for RAMSAC.")
-        return []
+    with _new_session() as session:
+        for s in stations:
+            d = start_date
+            while d < end_date:
+                if _after_last_file(s, d):
+                    break
+                try:
+                    if _exists_cached(session, s, d):
+                        found.append(s)
+                        break
+                except RuntimeError:
+                    raise                     # TLS problem: stop, it affects every station
+                except Exception as e:
+                    print(f"WARNING {s} on {d}: {e}")
+                d += timedelta(days=1)
 
-    except Exception as e:
-        print(f"ERROR: Unexpected error while querying RAMSAC station list: {e}")
-        return []
-
-    return sorted(list(set(list_stations)))
+    _save_cache()
+    return sorted(found)
 
 
 
@@ -394,7 +438,11 @@ def download_ramsac(station, start, end, output_dir="."):
 
         d = start
 
-        while d < end:
+        while d <= end:                       # end included, like sonel/nrcan
+
+            if _after_last_file(station, d):
+                print(f"STOP  {station} has no file after {LAST_FILE[station]}")
+                break
 
             doy = d.timetuple().tm_yday
             fname = _filename(station, d)
