@@ -14,6 +14,7 @@ from ionotec.download import chain
 from ionotec.download import afref
 from ionotec.download import panga
 from ionotec.download import whu
+from ionotec.download import ign
 
 
 from pathlib import Path
@@ -66,6 +67,8 @@ def download_rinex(station, d, output_dir='.'):
         return panga.download_file(station,d,output_dir)
     if source=='whu':
         return whu.download_file(station,d,output_dir)
+    if source=='ign':
+        return ign.download_file(station,d,output_dir)
 
 
 
@@ -130,6 +133,21 @@ class downrinex:
                     self.date_start, self.date_end,
                 )
                 print("WARNING australia unavailable, skipped (see sources_errors.log)")
+
+        if source in ['all','ign']:
+            try:
+                available_stations = ign.stations_available_ign(self.date_start, self.date_end)
+                for station in available_stations:
+                    if station in self.list_stations: continue
+                    self.dict_station_source[station]='ign'
+                    self.list_stations.append(station)
+            except Exception:
+                logging.exception(
+                    "ign: stations_available_garner failed (%s - %s)",
+                    self.date_start, self.date_end,
+                )
+                print("WARNING australia unavailable, skipped (see sources_errors.log)")
+
 
         #### GARNER: RINEX 3
         if source in ['all','garner']:
