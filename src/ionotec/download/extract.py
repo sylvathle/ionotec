@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Iterable, Union
 import shutil
 import gzip
+import subprocess
 
 def extract_and_remove_gz(gz_path: Path) -> Path:
     extracted_path = gz_path.with_suffix("")

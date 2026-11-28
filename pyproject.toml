@@ -14,8 +14,24 @@ classifiers = [
 
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
-dependencies = [ "georinex", "numpy", "pandas", "pymap3d", "datetime", "scipy", "pyarrow", "requests", "beautifulsoup4", "matplotlib", "cartopy" ]
+dependencies = [ "georinex", "numpy", "pandas", "pymap3d", "datetime", "scipy", "pyarrow", "requests", "beautifulsoup4", "matplotlib", "cartopy"]
 
 [project.urls]
 Homepage = "https://github.com/sylvathle/ionotec"
 Issues = "https://github.com/sylvathle/ionotec/issues"
+
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -m 'not network and not slow'"
+markers = [
+    "network: talks to a remote server (run explicitly with -m network)",
+    "slow: needs real RINEX files / takes more than a few seconds",
+]

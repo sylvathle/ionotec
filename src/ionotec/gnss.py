@@ -204,36 +204,30 @@ def getDateFromSat(Week, Toe, system='G'):
     epoch = BDS_EPOCH if system == 'C' else GPS_EPOCH
     return epoch + datetime.timedelta(weeks=Week, seconds=Toe)
 
-def removeOutsiders(df,thres=datetime.timedelta(days=1)):
-    #### Remove outsiders
+
+def removeOutsiders(df, thres=datetime.timedelta(days=1)):
+    """Drop points isolated from the rest of the series by a gap larger than `thres`."""
+    if len(df) < 2:
+        return df.copy()
+
     T = df.index
-    diff_t = []
-    for it in range(len(T)-1):
-        diff_t.append(T[it+1]-T[it])
-    
-    outsider=[]
+    diff_t = T[1:] - T[:-1]
+
+    outsider = []
     istail = False
-    thres_t = datetime.timedelta(days=1)
-    #hasValidData = False
-    for d in range(len(diff_t)):
-        if diff_t[d]>thres_t: 
+    for gap in diff_t:
+        if gap > thres:
             outsider.append(True)
         else:
-            if not istail: 
-                istail=True
+            if not istail:
+                istail = True
                 outsider.append(False)
             outsider.append(False)
-            #hasValidData = True
 
+    if not istail:          # no gap was small enough: every point is isolated
+        outsider.append(True)
 
-    #if not hasValidData:
-    #   return pd.DataFrame()
-
-            
-    df["out"] = outsider
-    df = df[df["out"]==False]
-    df.drop(columns=["out"],inplace=True)    
-    return df
+    return df[~np.array(outsider, dtype=bool)]
 
 def ephemeris_to_XYZ(data,date):
 

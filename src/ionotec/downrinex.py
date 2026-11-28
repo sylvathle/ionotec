@@ -15,6 +15,8 @@ from ionotec.download import afref
 from ionotec.download import panga
 from ionotec.download import whu
 from ionotec.download import ign
+from ionotec.download import epos
+from ionotec.download import kasi
 
 
 from pathlib import Path
@@ -69,6 +71,10 @@ def download_rinex(station, d, output_dir='.'):
         return whu.download_file(station,d,output_dir)
     if source=='ign':
         return ign.download_file(station,d,output_dir)
+    if source=='epos':
+        return epos.download_file(station,d,output_dir)
+    if source=='kasi':
+        return kasi.download_file(station,d,output_dir)
 
 
 
@@ -87,7 +93,10 @@ class downrinex:
 
 
     def list_available_stations(self,source='all'):
+        # each call is a fresh listing: reset both, so list_stations and
+        # dict_station_source (and stations_source.csv) always contain the same stations
         self.dict_station_source = {}
+        self.list_stations = []
 
         #### IGS: RINEX 4
         if source in ['all','igs']:
@@ -285,6 +294,36 @@ class downrinex:
                 )
                 print("WARNING afref unavailable, skipped (see sources_errors.log)")
 
+        #### EPOS (European networks: RENAG, RING, FReDNet, EUREF, SWEPOS, ESTPOS, ...): RINEX 4/3/2
+        if source in ['all', 'epos']:
+            try:
+                available_stations = epos.stations_available_epos(self.date_start, self.date_end)
+                for station in available_stations:
+                    if station in self.list_stations: continue
+                    self.dict_station_source[station] = 'epos'
+                    self.list_stations.append(station)
+            except Exception:
+                logging.exception(
+                    "epos: stations_available_epos failed (%s - %s)",
+                    self.date_start, self.date_end,
+                )
+                print("WARNING epos unavailable, skipped (see sources_errors.log)")
+
+        #### KASI (Korea): RINEX 3
+        if source in ['all', 'kasi']:
+            try:
+                available_stations = kasi.stations_available_kasi(self.date_start, self.date_end)
+                for station in available_stations:
+                    if station in self.list_stations: continue
+                    self.dict_station_source[station] = 'kasi'
+                    self.list_stations.append(station)
+            except Exception:
+                logging.exception(
+                    "kasi: stations_available_kasi failed (%s - %s)",
+                    self.date_start, self.date_end,
+                )
+                print("WARNING kasi unavailable, skipped (see sources_errors.log)")
+
 
         #### CORS: RINEX 2
         if source in ['all', 'cors']:
@@ -385,6 +424,10 @@ class downrinex:
             return afref.download_afref(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
         if source  == 'panga':
             return panga.download_panga(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
+        if source  == 'epos':
+            return epos.download_epos(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
+        if source  == 'kasi':
+            return kasi.download_kasi(station, self.date_start, self.date_end, output_dir=self.folder_deposit)
 
 
 

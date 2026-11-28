@@ -9,3 +9,8 @@ requests
 beautifulsoup4
 matplotlib
 cartopy
+gzip
+
+[dev]
+pytest
+pytest-cov

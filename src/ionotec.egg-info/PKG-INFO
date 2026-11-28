@@ -22,6 +22,10 @@ Requires-Dist: requests
 Requires-Dist: beautifulsoup4
 Requires-Dist: matplotlib
 Requires-Dist: cartopy
+Requires-Dist: gzip
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
 Dynamic: license-file
 
 # ionotec
